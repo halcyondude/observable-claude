@@ -97,6 +97,29 @@ def get_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     return [dict(zip(columns, row)) for row in rows]
 
 
+def get_session_events(conn: duckdb.DuckDBPyConnection, session_id: str) -> list[dict]:
+    """Return all events for a session ordered chronologically (ASC)."""
+    rows = conn.execute(
+        """
+        SELECT * FROM events
+        WHERE session_id = ?
+        ORDER BY received_at ASC
+        """,
+        [session_id],
+    ).fetchall()
+    columns = [desc[0] for desc in conn.description]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def get_session_event_count(conn: duckdb.DuckDBPyConnection, session_id: str) -> int:
+    """Return the total number of events for a session."""
+    result = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE session_id = ?",
+        [session_id],
+    ).fetchone()
+    return result[0] if result else 0
+
+
 def get_active_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     rows = conn.execute(
         """

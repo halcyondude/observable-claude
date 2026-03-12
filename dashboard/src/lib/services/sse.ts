@@ -1,6 +1,9 @@
 import { connectionStatus, reconnectAttempt } from '$lib/stores/connection';
 import { events, unreadToolCount } from '$lib/stores/events';
 import { activeSessionId, liveSessionId, sessions } from '$lib/stores/session';
+import {
+	isReplaying, replayPosition, replayTotal, replayPaused, stopReplay
+} from '$lib/stores/replay';
 import { fetchActiveSessions, fetchSessionGraph } from '$lib/services/api';
 import { get } from 'svelte/store';
 import type { ObserverEvent } from '$lib/types/events';
@@ -98,5 +101,80 @@ async function refreshSessionState(): Promise<void> {
 		}
 	} catch {
 		// collector may not be ready yet
+	}
+}
+
+let replaySource: EventSource | null = null;
+
+export function connectReplay(sessionId: string, speed: number = 1): void {
+	disconnectReplay();
+
+	// Clear existing events so replay starts fresh
+	events.clear();
+
+	const url = `/api/sessions/${sessionId}/replay/stream?speed=${speed}`;
+	replaySource = new EventSource(url);
+
+	replaySource.onopen = () => {
+		isReplaying.set(true);
+	};
+
+	replaySource.onmessage = (msg) => {
+		try {
+			const data = JSON.parse(msg.data);
+			const event: ObserverEvent = data;
+
+			// Update replay position from server-injected metadata
+			if (data.replay_position !== undefined) {
+				replayPosition.set(data.replay_position);
+			}
+			if (data.replay_total !== undefined) {
+				replayTotal.set(data.replay_total);
+			}
+
+			events.push(event);
+
+			if (
+				event.event_type === 'PreToolUse' ||
+				event.event_type === 'PostToolUse' ||
+				event.event_type === 'PostToolUseFailure'
+			) {
+				unreadToolCount.update((n) => n + 1);
+			}
+		} catch {
+			// ignore malformed messages
+		}
+	};
+
+	// Handle named events
+	replaySource.addEventListener('replay_start', (e: Event) => {
+		try {
+			const me = e as MessageEvent;
+			const data = JSON.parse(me.data);
+			replayTotal.set(data.total_events);
+			replayPosition.set(0);
+		} catch {
+			// ignore
+		}
+	});
+
+	replaySource.addEventListener('replay_end', () => {
+		replayPaused.set(true);
+	});
+
+	replaySource.onerror = () => {
+		// Replay stream ended or errored
+		if (replaySource) {
+			replaySource.close();
+			replaySource = null;
+		}
+		stopReplay();
+	};
+}
+
+export function disconnectReplay(): void {
+	if (replaySource) {
+		replaySource.close();
+		replaySource = null;
 	}
 }

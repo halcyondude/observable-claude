@@ -65,3 +65,21 @@ export async function executeCypher(cypher: string): Promise<QueryResult> {
 		body: JSON.stringify({ cypher })
 	});
 }
+
+export async function replayControl(
+	sessionId: string,
+	action: 'pause' | 'resume' | 'seek' | 'speed' | 'stop',
+	params?: { position?: number; speed?: number }
+): Promise<Record<string, unknown>> {
+	return fetchJson(`/api/sessions/${sessionId}/replay/control`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ action, ...params })
+	});
+}
+
+export async function replayStatus(
+	sessionId: string
+): Promise<{ active: boolean; paused?: boolean; position?: number; total?: number; speed?: number }> {
+	return fetchJson(`/api/sessions/${sessionId}/replay/status`);
+}

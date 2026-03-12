@@ -1,8 +1,16 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { sessions, activeSessionId, liveSessionId, switchToSession } from '$lib/stores/session';
+	import { isReplaying, startReplay as startReplayStore } from '$lib/stores/replay';
 	import { fetchSessions } from '$lib/services/api';
+	import { connectReplay } from '$lib/services/sse';
 	import type { SessionInfo } from '$lib/types/events';
+
+	function handleReplay(session: SessionInfo) {
+		startReplayStore(session.session_id);
+		switchToSession(session.session_id);
+		connectReplay(session.session_id, 1);
+	}
 
 	let sessionList = $state<SessionInfo[]>([]);
 	let loadError = $state<string | null>(null);
@@ -94,9 +102,22 @@
 					<span>{formatDuration(session.start_time, session.end_time)}</span>
 				</div>
 
-				<div class="flex gap-3 mt-1 text-xs" style="color: var(--color-text-muted);">
+				<div class="flex gap-3 mt-1 text-xs items-center" style="color: var(--color-text-muted);">
 					<span>{session.agent_count} agents</span>
 					<span>{session.event_count} events</span>
+					{#if !session.is_active}
+						<span
+							role="button"
+							tabindex="0"
+							onclick={(e) => { e.stopPropagation(); handleReplay(session); }}
+							onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); handleReplay(session); } }}
+							class="ml-auto px-2 py-0.5 rounded text-xs cursor-pointer"
+							style="background: var(--color-surface-2); color: var(--color-primary);"
+							title="Replay session"
+						>
+							Replay
+						</span>
+					{/if}
 				</div>
 			</button>
 		{/each}
@@ -126,7 +147,16 @@
 							<div>duration</div>
 						</div>
 					</div>
-					<div class="text-xs" style="color: var(--color-text-muted);">
+					{#if !session.is_active}
+						<button
+							onclick={() => handleReplay(session)}
+							class="mt-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer border-none"
+							style="background: var(--color-primary); color: white;"
+						>
+							Replay Session
+						</button>
+					{/if}
+					<div class="text-xs mt-2" style="color: var(--color-text-muted);">
 						Select a view from the sidebar to explore this session's data
 					</div>
 				</div>

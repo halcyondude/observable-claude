@@ -11,7 +11,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from anthropic import Anthropic
 
-from .ledger import init_db, write_event, query_events, get_sessions, get_active_sessions
+from .ledger import (
+    init_db, write_event, query_events, get_sessions, get_active_sessions,
+    get_session_events, get_session_event_count,
+)
 from .graph import init_graph, materialize_event, get_session_graph, get_session_timeline, reset_graph
 from . import nl_query
 
@@ -24,6 +27,10 @@ _graph_db = None
 _anthropic_client = None
 _sse_clients: list[asyncio.Queue] = []
 
+# Replay state: keyed by session_id
+# Each entry: {"speed": float, "paused": bool, "position": int, "total": int, "event": asyncio.Event}
+_replay_states: dict[str, dict] = {}
+
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
@@ -31,7 +38,8 @@ async def lifespan(application: FastAPI):
     db_path = os.environ.get("DUCKDB_PATH", "./data/duckdb/events.db")
     ladybug_path = os.environ.get("LADYBUG_PATH", "./data/ladybug")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    os.makedirs(ladybug_path, exist_ok=True)
+    # LadybugDB creates the database directory itself — only ensure parent exists
+    os.makedirs(os.path.dirname(ladybug_path) or ".", exist_ok=True)
     _db = init_db(db_path)
     _graph_db, _graph_conn = init_graph(ladybug_path)
     _start_time = time.time()
@@ -244,3 +252,173 @@ async def replay():
     except Exception:
         logger.exception("Replay failed")
         return {"status": "error", "message": "Replay failed"}
+
+
+@app.get("/api/sessions/{session_id}/replay/stream")
+async def replay_stream(session_id: str, speed: float = Query(1, ge=0, le=100)):
+    """SSE endpoint that replays a session's events with timing proportional to original gaps."""
+    if not _db:
+        return JSONResponse({"error": "Database not initialized"}, status_code=500)
+
+    events_list = get_session_events(_db, session_id)
+    if not events_list:
+        return JSONResponse({"error": "No events found for session"}, status_code=404)
+
+    total = len(events_list)
+
+    # Initialize replay state
+    pause_event = asyncio.Event()
+    pause_event.set()  # Start unpaused
+    state = {
+        "speed": speed,
+        "paused": False,
+        "position": 0,
+        "total": total,
+        "pause_event": pause_event,
+        "cancelled": False,
+    }
+    _replay_states[session_id] = state
+
+    async def replay_generator():
+        try:
+            # Emit metadata as first event
+            yield {
+                "event": "replay_start",
+                "data": json.dumps({
+                    "session_id": session_id,
+                    "total_events": total,
+                    "speed": state["speed"],
+                }),
+            }
+
+            prev_ts = None
+            for i, row in enumerate(events_list):
+                if state["cancelled"]:
+                    break
+
+                # Wait if paused
+                await state["pause_event"].wait()
+
+                if state["cancelled"]:
+                    break
+
+                # Handle seek: if position jumped ahead, skip
+                if i < state["position"]:
+                    continue
+
+                state["position"] = i
+
+                # Calculate delay based on inter-event gap
+                received_at = row.get("received_at")
+                if prev_ts is not None and received_at is not None and state["speed"] > 0:
+                    try:
+                        from datetime import datetime
+                        if isinstance(received_at, str):
+                            curr = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+                        else:
+                            curr = received_at
+                        if isinstance(prev_ts, str):
+                            prev = datetime.fromisoformat(prev_ts.replace("Z", "+00:00"))
+                        else:
+                            prev = prev_ts
+
+                        gap_seconds = (curr - prev).total_seconds()
+                        if gap_seconds > 0:
+                            delay = gap_seconds / state["speed"]
+                            # Cap individual delays at 5 seconds to keep replay responsive
+                            delay = min(delay, 5.0)
+                            await asyncio.sleep(delay)
+                    except (ValueError, TypeError):
+                        pass
+
+                prev_ts = received_at
+
+                # Parse payload and emit as SSE event
+                payload_raw = row.get("payload")
+                if isinstance(payload_raw, str):
+                    payload_data = json.loads(payload_raw)
+                else:
+                    payload_data = payload_raw or {}
+
+                event_type = row.get("event_type", "unknown")
+
+                sse_data = json.dumps({
+                    "event_id": row.get("event_id"),
+                    "replay_position": i,
+                    "replay_total": total,
+                    **payload_data,
+                })
+
+                yield {"event": event_type, "data": sse_data}
+
+            # Emit completion event
+            yield {
+                "event": "replay_end",
+                "data": json.dumps({
+                    "session_id": session_id,
+                    "total_events": total,
+                }),
+            }
+        finally:
+            _replay_states.pop(session_id, None)
+
+    return EventSourceResponse(replay_generator())
+
+
+@app.post("/api/sessions/{session_id}/replay/control")
+async def replay_control(session_id: str, request: Request):
+    """Control an active replay: pause, resume, seek, or stop."""
+    state = _replay_states.get(session_id)
+    if not state:
+        return JSONResponse({"error": "No active replay for this session"}, status_code=404)
+
+    body = await request.json()
+    action = body.get("action")
+
+    if action == "pause":
+        state["paused"] = True
+        state["pause_event"].clear()
+        return {"status": "paused", "position": state["position"]}
+
+    elif action == "resume":
+        state["paused"] = False
+        state["pause_event"].set()
+        return {"status": "playing", "position": state["position"]}
+
+    elif action == "seek":
+        position = body.get("position", 0)
+        if not isinstance(position, int) or position < 0 or position >= state["total"]:
+            return JSONResponse({"error": "Invalid position"}, status_code=400)
+        state["position"] = position
+        # If paused, stay paused at new position
+        return {"status": "paused" if state["paused"] else "playing", "position": position}
+
+    elif action == "speed":
+        speed = body.get("speed", 1)
+        if not isinstance(speed, (int, float)) or speed < 0:
+            return JSONResponse({"error": "Invalid speed"}, status_code=400)
+        state["speed"] = speed
+        return {"status": "ok", "speed": speed}
+
+    elif action == "stop":
+        state["cancelled"] = True
+        state["pause_event"].set()  # Unblock if paused so generator can exit
+        return {"status": "stopped"}
+
+    else:
+        return JSONResponse({"error": f"Unknown action: {action}"}, status_code=400)
+
+
+@app.get("/api/sessions/{session_id}/replay/status")
+async def replay_status(session_id: str):
+    """Get current replay state for a session."""
+    state = _replay_states.get(session_id)
+    if not state:
+        return {"active": False}
+    return {
+        "active": True,
+        "paused": state["paused"],
+        "position": state["position"],
+        "total": state["total"],
+        "speed": state["speed"],
+    }

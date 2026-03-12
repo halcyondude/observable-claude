@@ -2,7 +2,9 @@
 	import '../app.css';
 	import TopBar from '$lib/components/TopBar.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
+	import ReplayToolbar from '$lib/components/ReplayToolbar.svelte';
 	import { viewingArchived, returnToLive, activeSession } from '$lib/stores/session';
+	import { isReplaying } from '$lib/stores/replay';
 	import { connectSSE, disconnectSSE } from '$lib/services/sse';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -57,8 +59,10 @@
 
 	<div class="flex flex-1 overflow-hidden">
 		<Sidebar />
-		<main class="flex-1 overflow-auto">
+		<main class="flex-1 overflow-auto" style={$isReplaying ? 'padding-bottom: 64px;' : ''}>
 			{@render children()}
 		</main>
 	</div>
+
+	<ReplayToolbar />
 </div>
