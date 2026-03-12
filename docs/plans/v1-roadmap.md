@@ -1,12 +1,12 @@
 # CC Observer v1 — Execution Plan
 
-> Three epics, thirteen issues, three parallel tracks, one dashboard. This is the plan to ship v1.
+> Four epics, eighteen issues, four parallel tracks, one dashboard. This is the plan to ship v1.
 
 ---
 
 ## System Architecture — v1 Target State
 
-Everything in the current system stays. Three feature sets layer on top: agent conversations (content capture), session persistence (save/replay), and multi-session overview (Galaxy View). They share the same collector, the same DuckDB ledger, the same LadybugDB graph, and the same SSE pipe.
+Everything in the current system stays. Four feature sets layer on top: agent conversations (content capture), session persistence (save/replay), multi-session overview (Galaxy View), and tool call visualization. They share the same collector, the same DuckDB ledger, the same LadybugDB graph, and the same SSE pipe.
 
 ```mermaid
 flowchart TB
@@ -78,6 +78,7 @@ flowchart TB
     classDef save fill:#dcfce7,stroke:#22c55e,color:#14532d
     classDef galaxy fill:#ede9fe,stroke:#8b5cf6,color:#3b0764
     classDef integration fill:#fef3c7,stroke:#f59e0b,color:#78350f
+    classDef toolviz fill:#fce7d6,stroke:#e07c4f,color:#7c2d12
 
     %% Agent Conversations epic (#3)
     4["#4 Prompt capture\n+ DuckDB messages"]:::convo
@@ -98,7 +99,13 @@ flowchart TB
     15["#15 Galaxy View\nswim lanes + brush"]:::galaxy
     16["#16 Polish: recency,\nkeyboard, edges"]:::galaxy
 
-    INT["#19 Integration:\nGalaxy + Save +\nConversation"]:::integration
+    %% Tool Call Visualization epic (#22)
+    23["#23 Design tokens\n+ atomic components"]:::toolviz
+    24["#24 Spawn Tree\npip ring + detail"]:::toolviz
+    25["#25 Timeline\ncolored ticks + expand"]:::toolviz
+    26["#26 Tool Feed +\nGalaxy + cross-nav"]:::toolviz
+
+    INT["#19 Integration:\nall four epics"]:::integration
 
     %% Intra-epic dependencies
     4 --> 5
@@ -116,15 +123,22 @@ flowchart TB
     14 --> 15
     15 --> 16
 
+    23 --> 24
+    23 --> 25
+    24 --> 26
+    25 --> 26
+
     %% Cross-epic dependencies
     10 -.->|saved sessions\nin Galaxy View| 15
     4 -.->|messages in\nconvo panel| 6
     13 -.->|workspace grouping\nfor session list| 11
+    15 -.->|Galaxy View\ntool tints| 26
 
     %% Integration point
     6 --> INT
     12 --> INT
     16 --> INT
+    26 --> INT
 ```
 
 ### Critical Path
@@ -143,32 +157,31 @@ This is 4 issues, roughly 1.5-2 weeks of sequential work for one engineer. The o
 
 ## Parallel Execution Plan
 
-Three independent tracks that can execute simultaneously. Each track has a single engineer who owns it end-to-end. Tracks converge at integration.
+Four independent tracks that can execute simultaneously. Tracks converge at integration.
 
 ### Track Layout
 
-| Week | Track A: Conversations | Track B: Save/Replay | Track C: Galaxy View |
-|---|---|---|---|
-| **1** | #4 Prompt capture (M) | #10 Save/bookmark (S) | #13 Workspace node + API (M) |
-| **1** | | #11 Export/import (M) | #18 Activity sparkline API (S) |
-| **2** | #5 Message graph schema (M) | #12 Event replay (L, starts) | #14 Multi-session store (M) |
-| **2** | #6 Conversation panel (L, starts) | #12 Event replay (L, cont.) | #15 Galaxy View UI (L, starts) |
-| **3** | #6 Conversation panel (L, cont.) | #12 Event replay (L, done) | #15 Galaxy View UI (L, cont.) |
-| **3** | #7 Search + query (M) | | #16 Polish + edge cases (M) |
-| **4** | #8 Response inference (L) | **Integration** | **Integration** |
-| **4** | **Integration** | | |
+| Week | Track A: Conversations | Track B: Save/Replay | Track C: Galaxy View | Track D: Tool Viz |
+|---|---|---|---|---|
+| **1** | #4 Prompt capture (M) | #10 Save/bookmark (S) | #13 Workspace node (M) | #23 Design tokens (S) |
+| **1** | | #11 Export/import (M) | #18 Sparkline API (S) | #24 Spawn Tree (M, starts) |
+| **2** | #5 Message graph (M) | #12 Replay (L, starts) | #14 Multi-session store (M) | #24 Spawn Tree (M, done) |
+| **2** | #6 Convo panel (L, starts) | #12 Replay (L, cont.) | #15 Galaxy View UI (L, starts) | #25 Timeline (M) |
+| **3** | #6 Convo panel (L, done) | #12 Replay (L, done) | #15 Galaxy View UI (L, done) | #26 Feed + Galaxy (M) |
+| **3** | #7 Search + query (M) | | #16 Polish (M) | |
+| **4** | #8 Response inference (L) | **Integration** | **Integration** | **Integration** |
 
 ### Immediate Starts (zero dependencies)
 
-These three issues have no blockers and can begin right now, in parallel:
+These issues have no blockers and can begin right now, in parallel:
 
 | Issue | Track | Size | Why it's unblocked |
 |---|---|---|---|
 | **#4** Prompt capture + DuckDB messages | A | M | Extends existing collector. No schema conflicts. |
 | **#10** Save/bookmark | B | S | New DuckDB table + simple API. Self-contained. |
 | **#13** Workspace node + grouped API | C | M | New graph node + new API endpoints. Additive. |
-
-**#18** (Activity sparkline API) is also unblocked — it's a standalone DuckDB query endpoint. Can start alongside #13 in Track C.
+| **#18** Activity sparkline API | C | S | Standalone DuckDB query endpoint. |
+| **#23** Tool viz design tokens + components | D | S | Pure frontend. No backend deps. |
 
 ### Parallel Tracks
 
@@ -198,6 +211,15 @@ Owner: engineer strong on SvelteKit, uPlot, and real-time dashboard state.
 ```
 
 #13 and #18 are both backend API work and can run in parallel or be done by the same person sequentially. #14 is the critical dashboard plumbing (store refactor). #15 is the big UI build. #16 is polish.
+
+**Track D — Tool Call Visualization** (Epic #22)
+Owner: frontend engineer. Pure dashboard work, no backend changes.
+
+```
+#23 → #24 + #25 (parallel) → #26
+```
+
+#23 establishes design tokens and atomic components (small). #24 (Spawn Tree) and #25 (Timeline) can run in parallel after #23. #26 wires Tool Feed, Galaxy View integration, and cross-view navigation — has a soft dep on #15 for Galaxy View tool tints.
 
 ### Merge Points
 
@@ -303,6 +325,15 @@ The dashboard shell (top bar + left sidebar + content area) stays unchanged. New
 | #15 | Galaxy View swim lanes + time brush | L | Hard (6/10) | dashboard | #14, #18 |
 | #16 | Polish: recency, keyboard, edge cases | M | Involved (4/10) | collector, dashboard | #15 |
 
+### Epic #22 — Tool Call Visualization
+
+| Issue | Title | Size | Difficulty | Labels | Blocked By |
+|---|---|---|---|---|---|
+| #23 | Design tokens + atomic components | S | Routine (2/10) | dashboard | None |
+| #24 | Spawn Tree pip ring + detail panel | M | Involved (4/10) | dashboard | #23 |
+| #25 | Timeline colored ticks + expandable rows | M | Involved (4/10) | dashboard | #23 |
+| #26 | Tool Feed + Galaxy View + cross-view nav | M | Involved (4/10) | dashboard | #24, #25 |
+
 ### Integration Issue
 
 **#19: v1 integration and end-to-end validation**
@@ -324,20 +355,21 @@ Cross-epic integration work that doesn't belong in any single track:
 
 ## Parallelization Summary
 
-**Immediate starts (day 1):** #4, #10, #13, #18
+**Immediate starts (day 1):** #4, #10, #13, #18, #23
 
-**Three parallel tracks:**
+**Four parallel tracks:**
 - Track A (Conversations): #4 → #5 → #6 → #7 → #8
 - Track B (Save/Replay): #10 → #11 → #12
 - Track C (Galaxy View): #13 + #18 → #14 → #15 → #16
+- Track D (Tool Viz): #23 → #24 + #25 → #26
 
-**Critical path:** Track C — Galaxy View. Longest sequential chain at ~2 weeks.
+**Critical path:** Track A — Conversations. Longest sequential chain at ~3 weeks (5 issues).
 
-**Merge point:** After all three tracks complete, one integration issue ties them together.
+**Merge point:** After all four tracks complete, #19 ties them together.
 
-**With 3 engineers:** ~3.5 weeks to v1. Track C sets the pace.
-**With 2 engineers:** ~4.5 weeks. Run Track A + Track C in parallel, then Track B.
-**With 1 engineer:** ~6-7 weeks. Execute tracks sequentially, prioritize Track C (most user-visible value) then Track B (persistence), then Track A (content depth).
+**With 4 engineers:** ~3.5 weeks to v1. One track each, Track A sets the pace.
+**With 2 engineers:** ~4 weeks. Pair Track A + Track D (one engineer), Track B + Track C (one engineer). Track D is pure frontend and fits between Track A's backend/frontend transitions.
+**With 1 engineer:** ~7-8 weeks. Prioritize Track C (most user-visible), then D (builds on C's Galaxy View), then B (persistence), then A (content depth).
 
 ---
 
