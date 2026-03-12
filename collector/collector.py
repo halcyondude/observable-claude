@@ -5,13 +5,16 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Query
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, Query, UploadFile, File
+from fastapi.responses import JSONResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
 from anthropic import Anthropic
 
-from .ledger import init_db, write_event, query_events, get_sessions, get_active_sessions
+from .ledger import (
+    init_db, write_event, query_events, get_sessions, get_active_sessions,
+    export_session_gzip, import_session, parse_ccobs,
+)
 from .graph import init_graph, materialize_event, get_session_graph, get_session_timeline, reset_graph
 from . import nl_query
 
@@ -158,6 +161,58 @@ async def session_timeline(session_id: str):
     except Exception:
         logger.exception("Failed to query session timeline for %s", session_id)
         return []
+
+
+@app.get("/api/sessions/{session_id}/export")
+async def export_session_endpoint(session_id: str):
+    """Download a session as a .ccobs file (gzipped JSON)."""
+    if not _db:
+        return JSONResponse({"error": "Database not initialized"}, status_code=503)
+
+    # Fetch graph and timeline data (best-effort if graph is unavailable)
+    graph_data = {"nodes": [], "edges": []}
+    timeline_data = []
+    if _graph_conn:
+        try:
+            graph_data = get_session_graph(_graph_conn, session_id)
+        except Exception:
+            logger.exception("Failed to get graph for export of %s", session_id)
+        try:
+            timeline_data = get_session_timeline(_graph_conn, session_id)
+        except Exception:
+            logger.exception("Failed to get timeline for export of %s", session_id)
+
+    try:
+        gz_bytes = export_session_gzip(_db, session_id, graph_data, timeline_data)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+    filename = f"{session_id[:12]}.ccobs"
+    return Response(
+        content=gz_bytes,
+        media_type="application/gzip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/sessions/import")
+async def import_session_endpoint(file: UploadFile = File(...)):
+    """Import a .ccobs file."""
+    if not _db:
+        return JSONResponse({"error": "Database not initialized"}, status_code=503)
+
+    raw = await file.read()
+    try:
+        data = parse_ccobs(raw)
+    except (json.JSONDecodeError, ValueError) as e:
+        return JSONResponse({"error": f"Invalid .ccobs file: {e}"}, status_code=400)
+
+    try:
+        result = import_session(_db, data)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    return result
 
 
 @app.post("/api/ask")
