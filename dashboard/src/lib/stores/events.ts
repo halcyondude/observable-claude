@@ -1,4 +1,4 @@
-import { writable, derived, get } from 'svelte/store';
+import { writable, derived } from 'svelte/store';
 import type { ObserverEvent } from '$lib/types/events';
 
 const MAX_EVENTS = 10_000;
@@ -61,3 +61,13 @@ export const toolNames = derived(events, ($events) => {
 });
 
 export const unreadToolCount = writable(0);
+
+/** Filter events by session_id. Returns a derived store scoped to one session. */
+export function getSessionEvents(sessionId: string) {
+	return derived(events, ($events) => $events.filter((e) => e.session_id === sessionId));
+}
+
+/** Filter events by session_id (non-reactive, for one-shot reads). */
+export function filterEventsBySession(allEvents: ObserverEvent[], sessionId: string): ObserverEvent[] {
+	return allEvents.filter((e) => e.session_id === sessionId);
+}
