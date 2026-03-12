@@ -1,0 +1,9 @@
+{
+  "name": "cc-observer",
+  "version": "0.1.0",
+  "description": "Real-time execution graph monitoring for Claude Code",
+  "commands": ["commands/*.md"],
+  "hooks": "hooks/hooks.json",
+  "skills": ["skills/*/SKILL.md"],
+  "agents": ["agents/*.md"]
+}

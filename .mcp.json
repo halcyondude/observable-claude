@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kuzu-observer": {
+      "command": "uvx",
+      "args": ["kuzu-mcp-server", "--db-path", "${CLAUDE_PLUGIN_ROOT}/data/kuzu"]
+    }
+  }
+}
