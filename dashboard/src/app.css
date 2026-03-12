@@ -12,6 +12,13 @@
 	--color-text-muted: #64748B;
 	--color-border: #1E3A4A;
 
+	/* Tool family colors */
+	--tool-file: #7EB8DA;
+	--tool-exec: #B8A9E8;
+	--tool-agent: #0A9396;
+	--tool-mcp: #E8A87C;
+	--tool-meta: #94D2BD;
+
 	--space-1: 4px;
 	--space-2: 8px;
 	--space-3: 12px;

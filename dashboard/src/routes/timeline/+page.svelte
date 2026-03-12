@@ -3,6 +3,7 @@
 	import { activeSessionId } from '$lib/stores/session';
 	import { events } from '$lib/stores/events';
 	import { fetchSessionTimeline } from '$lib/services/api';
+	import { getToolFamilyColor } from '$lib/stores/tool-families';
 	import type { TimelineAgent } from '$lib/types/events';
 
 	let agents = $state<TimelineAgent[]>([]);
@@ -147,10 +148,10 @@
 				ctx.stroke();
 			}
 
-			// Tool call ticks
+			// Tool call ticks — colored by tool family, coral override for failures
 			for (const tc of agent.tool_calls) {
 				const tickX = LABEL_WIDTH + ((tc.timestamp - sessionStart) / duration) * chartWidth;
-				ctx.fillStyle = tc.success ? '#0A9396' : '#CA6702';
+				ctx.fillStyle = tc.success ? getToolFamilyColor(tc.tool_name) : '#CA6702';
 				ctx.fillRect(tickX - TICK_WIDTH / 2, y + (ROW_HEIGHT - TICK_HEIGHT) / 2, TICK_WIDTH, TICK_HEIGHT);
 			}
 		}
