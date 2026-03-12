@@ -14,8 +14,8 @@ CC Observer is a local observability stack for Claude Code. It captures lifecycl
 flowchart TB
     subgraph HOST ["Host Machine"]
         direction TB
-        CC["Claude Code\nAgent Runtime"]:::primary
-        HOOKS["hooks.json\n12 event types"]:::config
+        CC["Claude Code<br/>Agent Runtime"]:::primary
+        HOOKS["hooks.json<br/>12 event types"]:::config
 
         CC -->|fires| HOOKS
     end
@@ -24,12 +24,12 @@ flowchart TB
         direction TB
         subgraph COLLECTOR ["Collector Service · FastAPI · Python 3.12"]
             direction LR
-            INGEST["/events\nPOST · :4001\nHook Ingestion"]:::endpoint
-            SSE_EP["/stream\nGET · :4002\nSSE Broadcast"]:::endpoint
-            REST["/api/*\nGET/POST · :4002\nREST API"]:::endpoint
-            NL["NL→Cypher\nAnthropic API"]:::module
-            GRAPH_MOD["graph.py\nMaterialization"]:::module
-            LEDGER_MOD["ledger.py\nEvent Writer"]:::module
+            INGEST["/events<br/>POST :4001"]:::endpoint
+            SSE_EP["/stream<br/>GET :4002"]:::endpoint
+            REST["/api/*<br/>GET/POST :4002"]:::endpoint
+            NL["NL-to-Cypher<br/>Anthropic API"]:::module
+            GRAPH_MOD["graph.py<br/>Materialization"]:::module
+            LEDGER_MOD["ledger.py<br/>Event Writer"]:::module
 
             INGEST --> LEDGER_MOD
             INGEST --> GRAPH_MOD
@@ -39,14 +39,14 @@ flowchart TB
 
         subgraph STORAGE ["Persistent Storage · Docker Volumes"]
             direction LR
-            DUCK[("DuckDB\n./data/duckdb/events.db\nImmutable Event Ledger")]:::storage
-            KUZU[("LadybugDB\n./data/kuzu/\nExecution Graph")]:::storage
+            DUCK[("DuckDB<br/>Event Ledger")]:::storage
+            KUZU[("LadybugDB<br/>Execution Graph")]:::storage
         end
 
         subgraph DASH_SVC ["Dashboard Service · SvelteKit + nginx"]
             direction LR
-            NGINX["nginx\nReverse Proxy\n:3000 → :80"]:::endpoint
-            SVELTE["SvelteKit\nCytoscape.js\n6 Views"]:::ui
+            NGINX["nginx<br/>Reverse Proxy :3000"]:::endpoint
+            SVELTE["SvelteKit<br/>Cytoscape.js"]:::ui
             NGINX --> SVELTE
         end
 
@@ -59,11 +59,11 @@ flowchart TB
     end
 
     subgraph MCP ["MCP Server"]
-        KUZU_MCP["kuzu-mcp-server\nDirect Cypher Access"]:::module
+        KUZU_MCP["kuzu-mcp-server<br/>Direct Cypher Access"]:::module
     end
 
-    HOOKS -->|"HTTP POST\nlocalhost:4001"| INGEST
-    HOOKS -.->|"command fallback\nemit_event.py"| INGEST
+    HOOKS -->|"HTTP POST localhost:4001"| INGEST
+    HOOKS -.->|"command fallback emit_event.py"| INGEST
     KUZU -.-> KUZU_MCP
     KUZU_MCP -.->|"mcp__kuzu-observer__query"| CC
 
@@ -90,35 +90,35 @@ Every event goes through a deterministic pipeline: hook capture, HTTP delivery, 
 %%{init: {'theme': 'dark'}}%%
 flowchart LR
     subgraph CAPTURE ["1 · Capture"]
-        HOOK_FIRE["Claude Code\nfires hook"]:::step
-        HTTP_POST["HTTP POST\nlocalhost:4001/events"]:::step
-        CMD_FALL["Command Fallback\nemit_event.py"]:::fallback
+        HOOK_FIRE["Claude Code<br/>fires hook"]:::step
+        HTTP_POST["HTTP POST<br/>localhost:4001/events"]:::step
+        CMD_FALL["Command Fallback<br/>emit_event.py"]:::fallback
 
         HOOK_FIRE --> HTTP_POST
         HOOK_FIRE -.->|if HTTP fails| CMD_FALL
-        CMD_FALL -.->|retry POST or\nwrite JSONL| HTTP_POST
+        CMD_FALL -.->|"retry POST or write JSONL"| HTTP_POST
     end
 
     subgraph INGEST ["2 · Ingest"]
-        PARSE["Parse Payload\nextract fields"]:::step
-        WRITE_DUCK["write_event()\nDuckDB INSERT"]:::step
-        GEN_ID["Generate\nevent_id UUID"]:::step
+        PARSE["Parse Payload<br/>extract fields"]:::step
+        WRITE_DUCK["write_event()<br/>DuckDB INSERT"]:::step
+        GEN_ID["Generate<br/>event_id UUID"]:::step
 
         PARSE --> GEN_ID --> WRITE_DUCK
     end
 
     subgraph MATERIALIZE ["3 · Materialize"]
-        ROUTE["Route by\nevent_type"]:::step
-        CYPHER["Execute Cypher\nmutation"]:::step
-        SKIP["Skip\nDuckDB-only events"]:::fallback
+        ROUTE["Route by<br/>event_type"]:::step
+        CYPHER["Execute Cypher<br/>mutation"]:::step
+        SKIP["Skip<br/>DuckDB-only events"]:::fallback
 
         ROUTE -->|graph event| CYPHER
-        ROUTE -.->|Notification\nPermissionRequest\nPreCompact| SKIP
+        ROUTE -.->|"Notification / PermissionRequest / PreCompact"| SKIP
     end
 
     subgraph BROADCAST ["4 · Broadcast"]
-        QUEUE["Push to all\nSSE client queues"]:::step
-        SSE_OUT["SSE frame\nevent: type\ndata: JSON"]:::step
+        QUEUE["Push to all<br/>SSE client queues"]:::step
+        SSE_OUT["SSE frame<br/>event: type, data: JSON"]:::step
 
         QUEUE --> SSE_OUT
     end
@@ -231,23 +231,23 @@ Events reach the collector through dual delivery: HTTP primary with a command fa
 ```mermaid
 %%{init: {'theme': 'dark'}}%%
 flowchart TD
-    EVENT["Claude Code\nfires event"]:::primary
+    EVENT["Claude Code<br/>fires event"]:::primary
 
-    EVENT --> HTTP{"HTTP POST\nlocalhost:4001/events"}
+    EVENT --> HTTP{"HTTP POST<br/>localhost:4001/events"}
 
     HTTP -->|"200 OK"| DONE["Event ingested"]:::success
-    HTTP -->|"Connection refused\nor timeout"| CMD["Command fallback\nemit_event.py"]:::fallback
+    HTTP -->|"Connection refused or timeout"| CMD["Command fallback<br/>emit_event.py"]:::fallback
 
-    CMD --> JSONL["Write to\ndata/fallback.jsonl"]:::step
-    CMD --> RETRY{"Retry HTTP POST\n1s timeout"}
+    CMD --> JSONL["Write to<br/>data/fallback.jsonl"]:::step
+    CMD --> RETRY{"Retry HTTP POST<br/>1s timeout"}
 
     RETRY -->|"200 OK"| DONE
-    RETRY -->|"Still down"| SAVED["Event saved in JSONL\nfor later replay"]:::warn
+    RETRY -->|"Still down"| SAVED["Event saved in JSONL<br/>for later replay"]:::warn
 
-    NOTE1["PermissionRequest\nNotification\nPreCompact"]:::note --> HTTP_ONLY["HTTP only\nno command fallback"]:::step
+    NOTE1["PermissionRequest<br/>Notification<br/>PreCompact"]:::note --> HTTP_ONLY["HTTP only<br/>no command fallback"]:::step
     HTTP_ONLY --> HTTP
 
-    NOTE2["These events are http-only because\nspawning a subprocess during\npermission dialogs would block\nClaude Code visibly"]:::note
+    NOTE2["These events are http-only because<br/>spawning a subprocess during<br/>permission dialogs would block<br/>Claude Code visibly"]:::note
 
     classDef primary fill:#0A9396,stroke:#0A9396,color:#F4F8FB,stroke-width:2px
     classDef success fill:#1E293B,stroke:#94D2BD,color:#F4F8FB

@@ -470,8 +470,8 @@ classDiagram
     collector --> graph : materialize, query
     collector --> nl_query : translate
 
-    note for collector "FastAPI app\nEvent ingestion + API + SSE"
-    note for ledger "DuckDB operations\nImmutable event ledger"
-    note for graph "LadybugDB operations\nCypher mutations + queries"
-    note for nl_query "Anthropic API\nNL to Cypher translation"
+    note for collector "FastAPI app - Event ingestion + API + SSE"
+    note for ledger "DuckDB operations - Immutable event ledger"
+    note for graph "LadybugDB operations - Cypher mutations + queries"
+    note for nl_query "Anthropic API - NL to Cypher translation"
 ```

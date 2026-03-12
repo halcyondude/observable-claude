@@ -2,7 +2,6 @@
 
 **Real-time execution graph monitoring for Claude Code.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](collector/)
 [![SvelteKit](https://img.shields.io/badge/SvelteKit-Dashboard-FF3E00?logo=svelte&logoColor=white)](dashboard/)
@@ -19,7 +18,7 @@ CC Observer gives you real-time visibility into what Claude Code is actually doi
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph host ["Host Machine"]
         CC["Claude Code"]
         style CC fill:#0D1B2A,stroke:#0A9396,color:#F4F8FB,stroke-width:2px
@@ -27,34 +26,34 @@ flowchart LR
 
     subgraph docker ["Docker Compose Stack"]
         direction TB
-        subgraph collector_svc ["Collector · FastAPI"]
+        subgraph collector_svc ["Collector - FastAPI"]
             direction LR
-            INGEST["POST /events\n:4001"]
-            API["REST + SSE\n:4002"]
+            INGEST["POST /events :4001"]
+            API["REST + SSE :4002"]
             style INGEST fill:#1E293B,stroke:#0A9396,color:#F4F8FB
             style API fill:#1E293B,stroke:#0A9396,color:#F4F8FB
         end
 
         subgraph storage ["Storage Layer"]
             direction LR
-            DUCK[("DuckDB\nEvent Ledger")]
-            LADY[("LadybugDB\nExecution Graph")]
+            DUCK[("DuckDB<br/>Event Ledger")]
+            LADY[("LadybugDB<br/>Execution Graph")]
             style DUCK fill:#1E293B,stroke:#94D2BD,color:#F4F8FB
             style LADY fill:#1E293B,stroke:#94D2BD,color:#F4F8FB
         end
 
-        DASH["Dashboard\nSvelteKit · :3000"]
+        DASH["Dashboard<br/>SvelteKit :3000"]
         style DASH fill:#1E293B,stroke:#EE9B00,color:#F4F8FB
 
         style collector_svc fill:#0D1B2A,stroke:#0A9396,color:#F4F8FB
         style storage fill:#0D1B2A,stroke:#64748B,color:#F4F8FB
     end
 
-    CC -- "hooks\n12 event types" --> INGEST
+    CC -- "hooks / 12 event types" --> INGEST
     INGEST --> DUCK
     INGEST --> LADY
     API -- "SSE stream" --> DASH
-    API -- "REST\n/api/*" --> DASH
+    API -- "REST /api/*" --> DASH
     DUCK -.-> API
     LADY -.-> API
 
@@ -71,13 +70,10 @@ flowchart LR
 git clone https://github.com/halcyondude/observable-claude.git
 cd observable-claude
 
-# 2. Set your Anthropic API key (needed for NL→Cypher queries)
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# 3. Start the stack
+# 2. Start the stack
 docker compose up -d
 
-# 4. Open the dashboard
+# 3. Open the dashboard
 open http://localhost:3000
 ```
 
@@ -85,19 +81,21 @@ That's it. The hooks in `hooks/hooks.json` automatically capture events from Cla
 
 ### Using the Plugin
 
-Once installed as a Claude Code plugin, you get four commands:
+Once installed as a Claude Code plugin, you get five commands:
 
 | Command | What it does |
 |---|---|
-| `/observer:start` | Start the Docker stack, wait for healthy |
-| `/observer:stop` | Stop the Docker stack (data preserved) |
-| `/observer:status` | Show uptime, active sessions, agent count, event stats |
-| `/observer:query` | Ask a question about the execution graph in natural language |
+| `/oc:setup` | Configure Anthropic API key and verify the environment |
+| `/oc:start` | Start the Docker stack, wait for healthy |
+| `/oc:stop` | Stop the Docker stack (data preserved) |
+| `/oc:status` | Show uptime, active sessions, agent count, event stats |
+| `/oc:query` | Ask a question about the execution graph in natural language |
 
 ```
-> /observer:query which agents are running right now?
-> /observer:query what was the slowest tool call this session?
-> /observer:query show me the full spawn tree
+> /oc:setup
+> /oc:start
+> /oc:query which agents are running right now?
+> /oc:query what was the slowest tool call this session?
 ```
 
 ## Dashboard Views
@@ -169,4 +167,4 @@ See [Contributing Guide](docs/contributing.md) for development setup, project st
 
 ## License
 
-MIT
+All rights reserved. Not currently open source.

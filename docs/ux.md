@@ -50,7 +50,7 @@ stateDiagram-v2
     Sessions --> Analytics : Cmd+4
     Sessions --> Query : Cmd+5
 
-    Sessions --> SpawnTree : Select past session\n(switches all views)
+    Sessions --> SpawnTree : Select past session
 
     state SpawnTree {
         [*] --> LiveGraph
@@ -73,28 +73,28 @@ All views consume data from two sources: the SSE stream (real-time push) and the
 %%{init: {'theme': 'dark'}}%%
 flowchart TD
     subgraph SOURCES ["Data Sources"]
-        SSE["SSE /stream\nReal-time push"]:::source
-        REST_SESS["GET /api/sessions\nGET /api/sessions/active"]:::source
-        REST_GRAPH["GET /api/sessions/{id}/graph"]:::source
-        REST_TIME["GET /api/sessions/{id}/timeline"]:::source
+        SSE["SSE /stream<br/>Real-time push"]:::source
+        REST_SESS["GET /api/sessions"]:::source
+        REST_GRAPH["GET /api/sessions/id/graph"]:::source
+        REST_TIME["GET /api/sessions/id/timeline"]:::source
         REST_EVENTS["GET /api/events"]:::source
         REST_ASK["POST /api/ask"]:::source
         REST_CYPHER["POST /api/cypher"]:::source
     end
 
     subgraph STORES ["Client Stores"]
-        EVT_STORE["Event Store\nRing buffer · 10k events"]:::store
-        SESS_STORE["Session Store\nActive session state"]:::store
-        CONN_STORE["Connection Store\nSSE status"]:::store
+        EVT_STORE["Event Store<br/>Ring buffer 10k events"]:::store
+        SESS_STORE["Session Store<br/>Active session state"]:::store
+        CONN_STORE["Connection Store<br/>SSE status"]:::store
     end
 
     subgraph VIEWS ["Dashboard Views"]
-        V1["Spawn Tree\nCytoscape.js canvas"]:::view
-        V2["Timeline\nGantt bars"]:::view
-        V3["Tool Feed\nScrolling event list"]:::view
-        V4["Analytics\nCharts + stat cards"]:::view
-        V5["Query Console\nNL + Cypher editor"]:::view
-        V6["Session History\nSession list + detail"]:::view
+        V1["Spawn Tree<br/>Cytoscape.js canvas"]:::view
+        V2["Timeline<br/>Gantt bars"]:::view
+        V3["Tool Feed<br/>Scrolling event list"]:::view
+        V4["Analytics<br/>Charts + stat cards"]:::view
+        V5["Query Console<br/>NL + Cypher editor"]:::view
+        V6["Session History<br/>Session list + detail"]:::view
     end
 
     SSE --> EVT_STORE
