@@ -11,15 +11,21 @@ DDL_STATEMENTS = [
     "CREATE NODE TABLE IF NOT EXISTS Agent (agent_id STRING, agent_type STRING, session_id STRING, start_ts STRING, end_ts STRING, status STRING, PRIMARY KEY (agent_id))",
     "CREATE NODE TABLE IF NOT EXISTS Skill (name STRING, path STRING, PRIMARY KEY (name))",
     "CREATE NODE TABLE IF NOT EXISTS Tool (name STRING, PRIMARY KEY (name))",
+    "CREATE NODE TABLE IF NOT EXISTS Message (message_id STRING, role STRING, content_preview STRING, sequence INT64, timestamp STRING, content_bytes INT64, PRIMARY KEY (message_id))",
     "CREATE REL TABLE IF NOT EXISTS SPAWNED (FROM Session TO Agent, FROM Agent TO Agent, prompt STRING, depth INT64, spawned_at STRING)",
     "CREATE REL TABLE IF NOT EXISTS LOADED (FROM Agent TO Skill, loaded_at STRING)",
     "CREATE REL TABLE IF NOT EXISTS INVOKED (FROM Agent TO Tool, tool_use_id STRING, tool_input STRING, start_ts STRING, end_ts STRING, duration_ms INT64, status STRING, tool_response STRING)",
+    "CREATE REL TABLE IF NOT EXISTS HAS_MESSAGE (FROM Agent TO Message)",
+    "CREATE REL TABLE IF NOT EXISTS NEXT (FROM Message TO Message)",
 ]
 
 DROP_STATEMENTS = [
+    "DROP TABLE IF EXISTS NEXT",
+    "DROP TABLE IF EXISTS HAS_MESSAGE",
     "DROP TABLE IF EXISTS INVOKED",
     "DROP TABLE IF EXISTS LOADED",
     "DROP TABLE IF EXISTS SPAWNED",
+    "DROP TABLE IF EXISTS Message",
     "DROP TABLE IF EXISTS Tool",
     "DROP TABLE IF EXISTS Skill",
     "DROP TABLE IF EXISTS Agent",
@@ -72,6 +78,62 @@ def materialize_event(conn: Connection, event: dict) -> None:
         handler(conn, event)
     except Exception:
         logger.exception("Graph materialization failed for event_type=%s", event_type)
+
+
+CONTENT_PREVIEW_LIMIT = 500
+
+
+def materialize_message(
+    conn: Connection,
+    agent_id: str,
+    message_id: str,
+    role: str,
+    content: str,
+    sequence: int,
+    timestamp: str,
+) -> None:
+    """Create a Message node, HAS_MESSAGE edge, and NEXT edge from the previous message."""
+    content_preview = (content or "")[:CONTENT_PREVIEW_LIMIT]
+    content_bytes = len((content or "").encode("utf-8"))
+
+    # Create Message node
+    conn.execute(
+        "MERGE (m:Message {message_id: $mid}) "
+        "SET m.role = $role, m.content_preview = $preview, m.sequence = $seq, "
+        "m.timestamp = $ts, m.content_bytes = $cb",
+        parameters={
+            "mid": message_id,
+            "role": role,
+            "preview": content_preview,
+            "seq": sequence,
+            "ts": timestamp,
+            "cb": content_bytes,
+        },
+    )
+
+    # Create HAS_MESSAGE edge from Agent to Message
+    conn.execute(
+        "MATCH (a:Agent {agent_id: $aid}), (m:Message {message_id: $mid}) "
+        "CREATE (a)-[:HAS_MESSAGE]->(m)",
+        parameters={"aid": agent_id, "mid": message_id},
+    )
+
+    # Create NEXT edge from previous message (if sequence > 0)
+    if sequence > 0:
+        # Find the previous message for this agent at sequence - 1
+        result = conn.execute(
+            "MATCH (a:Agent {agent_id: $aid})-[:HAS_MESSAGE]->(prev:Message {sequence: $prev_seq}) "
+            "RETURN prev.message_id",
+            parameters={"aid": agent_id, "prev_seq": sequence - 1},
+        )
+        rows = result.get_all()
+        if rows:
+            prev_mid = rows[0][0]
+            conn.execute(
+                "MATCH (prev:Message {message_id: $prev_mid}), (curr:Message {message_id: $curr_mid}) "
+                "CREATE (prev)-[:NEXT]->(curr)",
+                parameters={"prev_mid": prev_mid, "curr_mid": message_id},
+            )
 
 
 # --- Per-event handlers ---
@@ -149,6 +211,11 @@ def _handle_subagent_start(conn: Connection, event: dict) -> None:
                 "ts": ts,
             },
         )
+
+    # Materialize the spawn prompt as a Message node
+    if prompt:
+        message_id = f"msg-{agent_id}-0"
+        materialize_message(conn, agent_id, message_id, "user", prompt, 0, ts)
 
 
 def _handle_subagent_stop(conn: Connection, event: dict) -> None:
@@ -385,6 +452,102 @@ def get_session_graph(conn: Connection, session_id: str) -> dict:
                 "end_ts": row[4],
                 "duration_ms": row[5],
                 "status": row[6],
+            }
+        })
+
+    # Message nodes for agents in this session
+    result = conn.execute(
+        "MATCH (a:Agent {session_id: $sid})-[:HAS_MESSAGE]->(m:Message) "
+        "RETURN m.message_id, m.role, m.content_preview, m.sequence, m.timestamp, m.content_bytes",
+        parameters={"sid": session_id},
+    )
+    for row in result.get_all():
+        nodes.append({
+            "data": {
+                "id": row[0],
+                "label": f"{row[1]} #{row[3]}",
+                "type": "Message",
+                "message_id": row[0],
+                "role": row[1],
+                "content_preview": row[2],
+                "sequence": row[3],
+                "timestamp": row[4],
+                "content_bytes": row[5],
+            }
+        })
+
+    # HAS_MESSAGE edges
+    result = conn.execute(
+        "MATCH (a:Agent {session_id: $sid})-[:HAS_MESSAGE]->(m:Message) "
+        "RETURN a.agent_id, m.message_id",
+        parameters={"sid": session_id},
+    )
+    for row in result.get_all():
+        edges.append({
+            "data": {
+                "source": row[0],
+                "target": row[1],
+                "label": "HAS_MESSAGE",
+            }
+        })
+
+    # NEXT edges between messages in this session
+    result = conn.execute(
+        "MATCH (a:Agent {session_id: $sid})-[:HAS_MESSAGE]->(m1:Message)-[:NEXT]->(m2:Message) "
+        "RETURN m1.message_id, m2.message_id",
+        parameters={"sid": session_id},
+    )
+    for row in result.get_all():
+        edges.append({
+            "data": {
+                "source": row[0],
+                "target": row[1],
+                "label": "NEXT",
+            }
+        })
+
+    return {"nodes": nodes, "edges": edges}
+
+
+def get_agent_messages_graph(conn: Connection, agent_id: str) -> dict:
+    """Return messages for an agent as a linked list subgraph in Cytoscape.js format."""
+    nodes = []
+    edges = []
+
+    # Message nodes
+    result = conn.execute(
+        "MATCH (a:Agent {agent_id: $aid})-[:HAS_MESSAGE]->(m:Message) "
+        "RETURN m.message_id, m.role, m.content_preview, m.sequence, m.timestamp, m.content_bytes "
+        "ORDER BY m.sequence",
+        parameters={"aid": agent_id},
+    )
+    for row in result.get_all():
+        nodes.append({
+            "data": {
+                "id": row[0],
+                "label": f"{row[1]} #{row[3]}",
+                "type": "Message",
+                "message_id": row[0],
+                "role": row[1],
+                "content_preview": row[2],
+                "sequence": row[3],
+                "timestamp": row[4],
+                "content_bytes": row[5],
+            }
+        })
+
+    # NEXT edges
+    result = conn.execute(
+        "MATCH (a:Agent {agent_id: $aid})-[:HAS_MESSAGE]->(m1:Message)-[:NEXT]->(m2:Message) "
+        "RETURN m1.message_id, m2.message_id",
+        parameters={"aid": agent_id},
+    )
+    for row in result.get_all():
+        edges.append({
+            "data": {
+                "source": row[0],
+                "target": row[1],
+                "label": "NEXT",
             }
         })
 
