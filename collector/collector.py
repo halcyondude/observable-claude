@@ -1,7 +1,8 @@
 import asyncio
+import json
+import logging
 import os
 import time
-import json
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Query
@@ -9,19 +10,26 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from .ledger import init_db, write_event, query_events, get_sessions, get_active_sessions
+from .graph import init_graph, materialize_event, get_session_graph, get_session_timeline, reset_graph
 
+logger = logging.getLogger(__name__)
 
 _start_time: float = 0.0
 _db = None
+_graph_conn = None
+_graph_db = None
 _sse_clients: list[asyncio.Queue] = []
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    global _db, _start_time
+    global _db, _graph_db, _graph_conn, _start_time
     db_path = os.environ.get("DUCKDB_PATH", "./data/duckdb/events.db")
+    kuzu_path = os.environ.get("KUZU_PATH", "./data/kuzu")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    os.makedirs(kuzu_path, exist_ok=True)
     _db = init_db(db_path)
+    _graph_db, _graph_conn = init_graph(kuzu_path)
     _start_time = time.time()
     yield
     if _db:
@@ -35,6 +43,13 @@ app = FastAPI(lifespan=lifespan)
 async def ingest_event(request: Request):
     payload = await request.json()
     event_id = write_event(_db, payload)
+
+    # Graph materialization — best-effort, never blocks event ingestion
+    if _graph_conn:
+        try:
+            materialize_event(_graph_conn, payload)
+        except Exception:
+            logger.exception("Graph materialization failed for event %s", event_id)
 
     event_type = payload.get("event", {}).get("event_type", payload.get("event_type", "unknown"))
     sse_data = json.dumps({"event_id": event_id, **payload})
@@ -109,3 +124,59 @@ async def list_events(
     if tool_use_id:
         filters["tool_use_id"] = tool_use_id
     return query_events(_db, filters=filters, limit=limit, offset=offset)
+
+
+@app.get("/api/sessions/{session_id}/graph")
+async def session_graph(session_id: str):
+    if not _graph_conn:
+        return {"nodes": [], "edges": []}
+    try:
+        return get_session_graph(_graph_conn, session_id)
+    except Exception:
+        logger.exception("Failed to query session graph for %s", session_id)
+        return {"nodes": [], "edges": []}
+
+
+@app.get("/api/sessions/{session_id}/timeline")
+async def session_timeline(session_id: str):
+    if not _graph_conn:
+        return []
+    try:
+        return get_session_timeline(_graph_conn, session_id)
+    except Exception:
+        logger.exception("Failed to query session timeline for %s", session_id)
+        return []
+
+
+@app.post("/api/replay")
+async def replay():
+    """Rebuild the LadybugDB graph from all DuckDB events."""
+    if not _db or not _graph_conn:
+        return {"status": "error", "message": "Database not initialized"}
+
+    try:
+        reset_graph(_graph_conn)
+
+        rows = _db.execute(
+            "SELECT payload FROM events ORDER BY received_at ASC"
+        ).fetchall()
+
+        replayed = 0
+        errors = 0
+        for (payload_json,) in rows:
+            event = json.loads(payload_json) if isinstance(payload_json, str) else payload_json
+            try:
+                materialize_event(_graph_conn, event)
+                replayed += 1
+            except Exception:
+                logger.exception("Replay failed for event")
+                errors += 1
+
+        return {
+            "status": "ok",
+            "events_replayed": replayed,
+            "errors": errors,
+        }
+    except Exception:
+        logger.exception("Replay failed")
+        return {"status": "error", "message": "Replay failed"}
