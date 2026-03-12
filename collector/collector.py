@@ -11,7 +11,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from anthropic import Anthropic
 
-from .ledger import init_db, write_event, query_events, get_sessions, get_active_sessions
+from .ledger import (
+    init_db, write_event, query_events, get_sessions, get_active_sessions,
+    get_activity_histogram, get_session_summary,
+)
 from .graph import init_graph, materialize_event, get_session_graph, get_session_timeline, reset_graph
 from . import nl_query
 
@@ -115,6 +118,23 @@ async def list_sessions():
 @app.get("/api/sessions/active")
 async def list_active_sessions():
     return get_active_sessions(_db)
+
+
+@app.get("/api/sessions/activity")
+async def session_activity(
+    bucket: int = Query(60, ge=1, le=3600),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
+):
+    """Time-bucketed event counts grouped by cwd for the Galaxy View time brush."""
+    buckets = get_activity_histogram(_db, bucket_seconds=bucket, since=since, until=until)
+    return {"bucket_seconds": bucket, "buckets": buckets}
+
+
+@app.get("/api/sessions/summary")
+async def session_summary():
+    """Aggregate session counts for the dashboard header."""
+    return get_session_summary(_db)
 
 
 @app.get("/api/events")

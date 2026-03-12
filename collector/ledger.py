@@ -20,6 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_pair ON events(tool_use_id);
 CREATE INDEX IF NOT EXISTS idx_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_time ON events(received_at);
+CREATE INDEX IF NOT EXISTS idx_cwd ON events(cwd);
 """
 
 
@@ -118,3 +119,68 @@ def get_active_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     ).fetchall()
     columns = [desc[0] for desc in conn.description]
     return [dict(zip(columns, row)) for row in rows]
+
+
+def get_activity_histogram(
+    conn: duckdb.DuckDBPyConnection,
+    bucket_seconds: int = 60,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
+    """Return event counts bucketed by time interval and cwd.
+
+    Each row contains {timestamp, count, cwd} where timestamp is the
+    bucket start time (floored to bucket_seconds).  Results are ordered
+    by timestamp ascending, then cwd.
+    """
+    clauses = []
+    params: list = []
+
+    if since is not None:
+        clauses.append("received_at >= ?::TIMESTAMPTZ")
+        params.append(since)
+    if until is not None:
+        clauses.append("received_at < ?::TIMESTAMPTZ")
+        params.append(until)
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            to_timestamp(
+                FLOOR(epoch(received_at) / ?) * ?
+            ) AS timestamp,
+            COUNT(*) AS count,
+            cwd
+        FROM events
+        {where}
+        GROUP BY timestamp, cwd
+        ORDER BY timestamp ASC, cwd
+        """,
+        [bucket_seconds, bucket_seconds, *params],
+    ).fetchall()
+
+    columns = [desc[0] for desc in conn.description]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def get_session_summary(conn: duckdb.DuckDBPyConnection) -> dict:
+    """Return aggregate session counts: total, active, and distinct workspaces."""
+    row = conn.execute(
+        """
+        SELECT
+            COUNT(DISTINCT session_id) AS total,
+            COUNT(DISTINCT CASE
+                WHEN session_id IN (
+                    SELECT session_id FROM events WHERE event_type = 'SessionStart'
+                ) AND session_id NOT IN (
+                    SELECT session_id FROM events WHERE event_type = 'SessionEnd'
+                ) THEN session_id
+            END) AS active,
+            COUNT(DISTINCT cwd) AS workspaces
+        FROM events
+        WHERE session_id IS NOT NULL
+        """
+    ).fetchone()
+    return {"total": row[0], "active": row[1], "workspaces": row[2]}
