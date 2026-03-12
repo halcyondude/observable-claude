@@ -7,7 +7,7 @@ Usage:
 
 Environment variables:
     DUCKDB_PATH  — path to DuckDB file (default: ./data/duckdb/events.db)
-    KUZU_PATH    — path to LadybugDB directory (default: ./data/kuzu)
+    LADYBUG_PATH    — path to LadybugDB directory (default: ./data/ladybug)
 """
 
 import json
@@ -27,16 +27,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def replay(duckdb_path: str, kuzu_path: str) -> None:
+def replay(duckdb_path: str, ladybug_path: str) -> None:
     logger.info("Connecting to DuckDB at %s", duckdb_path)
     duck = duckdb.connect(duckdb_path, read_only=True)
 
     total = duck.execute("SELECT COUNT(*) FROM events").fetchone()[0]
     logger.info("Found %d events to replay", total)
 
-    logger.info("Initializing LadybugDB at %s", kuzu_path)
-    os.makedirs(kuzu_path, exist_ok=True)
-    _db, conn = init_graph(kuzu_path)
+    logger.info("Initializing LadybugDB at %s", ladybug_path)
+    os.makedirs(ladybug_path, exist_ok=True)
+    _db, conn = init_graph(ladybug_path)
 
     logger.info("Resetting graph tables (clean slate)")
     reset_graph(conn)
@@ -74,13 +74,13 @@ def replay(duckdb_path: str, kuzu_path: str) -> None:
 
 def main() -> None:
     duckdb_path = os.environ.get("DUCKDB_PATH", "./data/duckdb/events.db")
-    kuzu_path = os.environ.get("KUZU_PATH", "./data/kuzu")
+    ladybug_path = os.environ.get("LADYBUG_PATH", "./data/ladybug")
 
     if not os.path.exists(duckdb_path):
         logger.error("DuckDB file not found at %s", duckdb_path)
         sys.exit(1)
 
-    replay(duckdb_path, kuzu_path)
+    replay(duckdb_path, ladybug_path)
 
 
 if __name__ == "__main__":

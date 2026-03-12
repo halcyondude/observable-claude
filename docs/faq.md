@@ -61,7 +61,7 @@ All data stays on your local machine in the `data/` directory:
 | Path | Contents |
 |---|---|
 | `data/duckdb/events.db` | DuckDB event ledger (immutable source of truth) |
-| `data/kuzu/` | LadybugDB graph database directory |
+| `data/ladybug/` | LadybugDB graph database directory |
 | `data/fallback.jsonl` | Command fallback events (only written when HTTP delivery fails) |
 
 These paths are mounted as Docker volumes. Data persists across container restarts.
@@ -82,7 +82,7 @@ Yes, three ways:
 1. **Dashboard Query Console** — type natural language or Cypher at `http://localhost:3000` (Query view)
 2. **Plugin command** — `/oc:query which agents are running?` from Claude Code
 3. **Raw API** — `POST http://localhost:4002/api/cypher` with `{"cypher": "MATCH (s:Session) RETURN s"}`
-4. **MCP tool** — Claude Code can call `mcp__kuzu-observer__query` directly when the plugin is installed
+4. **MCP tool** — Claude Code can call `mcp__ladybug-observer__query` directly when the plugin is installed
 
 ### How do I rebuild the graph if it gets corrupted?
 

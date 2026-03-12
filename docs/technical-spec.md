@@ -7,7 +7,7 @@ description: Graph schema, DuckDB schema, API reference, hook events, NL-to-Cyph
 
 ## Graph Schema (LadybugDB)
 
-The execution graph is a labeled property graph stored in LadybugDB (a Kuzu fork). Four node types and three relationship types capture the full topology of a Claude Code session.
+The execution graph is a labeled property graph stored in LadybugDB. Four node types and three relationship types capture the full topology of a Claude Code session.
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#0A9396'}}}%%
@@ -370,7 +370,7 @@ sequenceDiagram
     participant API as POST /api/ask
     participant NL as nl_query.py
     participant ANTH as Anthropic API
-    participant KUZU as LadybugDB
+    participant LADY as LadybugDB
 
     USER->>API: {"question": "which agents are running?"}
     API->>NL: translate(question, client)
@@ -381,8 +381,8 @@ sequenceDiagram
     ANTH-->>NL: {"cypher": "MATCH ...", "explanation": "..."}
     NL-->>API: {cypher, explanation}
 
-    API->>KUZU: conn.execute(cypher)
-    KUZU-->>API: result rows
+    API->>LADY: conn.execute(cypher)
+    LADY-->>API: result rows
 
     API-->>USER: {cypher, explanation, result}
 ```

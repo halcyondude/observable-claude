@@ -42,7 +42,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Run locally (uses ./data/ relative to project root)
-DUCKDB_PATH=../data/duckdb/events.db KUZU_PATH=../data/kuzu \
+DUCKDB_PATH=../data/duckdb/events.db LADYBUG_PATH=../data/ladybug \
     uvicorn collector:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -102,7 +102,7 @@ cc-observer/
 │   └── smoke_test.sh            # End-to-end verification
 ├── data/                        # Gitignored — DuckDB + LadybugDB data
 ├── docker-compose.yml
-├── .mcp.json                    # Kuzu MCP server registration
+├── .mcp.json                    # LadybugDB MCP server registration
 └── README.md
 ```
 

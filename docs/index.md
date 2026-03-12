@@ -22,7 +22,7 @@ Real-time execution graph monitoring for Claude Code. Captures every lifecycle e
 |---|---|---|
 | Collector | Python / FastAPI | Event ingestion, graph materialization, API + SSE |
 | Event Ledger | DuckDB | Immutable source of truth for all hook events |
-| Execution Graph | LadybugDB (Kuzu fork) | Labeled property graph for topology queries |
+| Execution Graph | LadybugDB | Labeled property graph for topology queries |
 | Dashboard | SvelteKit + Cytoscape.js | Real-time visualization across 6 views |
 | Infrastructure | Docker Compose | Single-command deployment of the full stack |
 | Plugin | Claude Code hooks + commands | Automatic event capture and CLI management |

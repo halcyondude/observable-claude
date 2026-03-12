@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a Cypher query generator for CC Observer, a Claude Code execution monitoring system.
 
-You translate natural language questions about agent execution into Cypher queries for LadybugDB (Kuzu-based property graph).
+You translate natural language questions about agent execution into Cypher queries for LadybugDB (embedded property graph).
 
 ## Graph Schema
 

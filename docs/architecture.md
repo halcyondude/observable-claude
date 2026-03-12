@@ -40,7 +40,7 @@ flowchart TB
         subgraph STORAGE ["Persistent Storage · Docker Volumes"]
             direction LR
             DUCK[("DuckDB<br/>Event Ledger")]:::storage
-            KUZU[("LadybugDB<br/>Execution Graph")]:::storage
+            LADY[("LadybugDB<br/>Execution Graph")]:::storage
         end
 
         subgraph DASH_SVC ["Dashboard Service · SvelteKit + nginx"]
@@ -51,21 +51,21 @@ flowchart TB
         end
 
         LEDGER_MOD --> DUCK
-        GRAPH_MOD --> KUZU
+        GRAPH_MOD --> LADY
         REST -.->|reads| DUCK
-        REST -.->|reads| KUZU
+        REST -.->|reads| LADY
         SSE_EP -->|push| NGINX
         REST -->|fetch| NGINX
     end
 
     subgraph MCP ["MCP Server"]
-        KUZU_MCP["kuzu-mcp-server<br/>Direct Cypher Access"]:::module
+        LADY_MCP["mcp-server-ladybug<br/>Direct Cypher Access"]:::module
     end
 
     HOOKS -->|"HTTP POST localhost:4001"| INGEST
     HOOKS -.->|"command fallback emit_event.py"| INGEST
-    KUZU -.-> KUZU_MCP
-    KUZU_MCP -.->|"mcp__kuzu-observer__query"| CC
+    LADY -.-> LADY_MCP
+    LADY_MCP -.->|"mcp__ladybug-observer__query"| CC
 
     classDef primary fill:#0A9396,stroke:#0A9396,color:#F4F8FB,stroke-width:2px
     classDef endpoint fill:#1E293B,stroke:#0A9396,color:#F4F8FB
@@ -273,7 +273,7 @@ Both ports 4001 and 4002 map to the same internal port 8000 in the collector con
 | Host Path | Container Path | Contents |
 |---|---|---|
 | `./data/duckdb/` | `/data/duckdb/` | `events.db` — DuckDB file |
-| `./data/kuzu/` | `/data/kuzu/` | LadybugDB data directory |
+| `./data/ladybug/` | `/data/ladybug/` | LadybugDB data directory |
 
 Data persists across container restarts and survives `docker compose down`. Only `docker compose down -v` removes volumes.
 
