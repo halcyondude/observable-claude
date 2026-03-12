@@ -210,6 +210,33 @@ Three events skip the command fallback — spawning a subprocess during permissi
 
 Two services, shared volumes.
 
+```mermaid
+flowchart TB
+    subgraph COMPOSE ["docker compose"]
+        subgraph COL ["collector · Python 3.12"]
+            FA["FastAPI :8000"]
+        end
+
+        subgraph DASH ["dashboard · SvelteKit"]
+            NG["nginx :80"]
+        end
+
+        subgraph VOLS ["volumes"]
+            D[("duckdb/")]
+            L[("ladybug/")]
+        end
+
+        FA --> D
+        FA --> L
+        NG -->|"/api/*, /stream"| FA
+    end
+
+    H4001["Host :4001<br/>hooks"] --> FA
+    H4002["Host :4002<br/>API + SSE"] --> FA
+    H4242["Host :4242<br/>dashboard"] --> NG
+    DASH -->|depends_on healthy| COL
+```
+
 | Service | Image | Ports | Purpose |
 |---|---|---|---|
 | `collector` | `./collector` (Python 3.12) | `4001:8000`, `4002:8000` | Event ingestion, graph materialization, REST + SSE API |
