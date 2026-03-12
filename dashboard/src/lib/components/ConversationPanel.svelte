@@ -1,24 +1,56 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { getAgentMessages } from '$lib/services/api';
 	import type { AgentMessage } from '$lib/types/events';
 
-	let { agentId }: { agentId: string } = $props();
+	let {
+		agent_id,
+		onclose
+	}: {
+		agent_id: string | null;
+		onclose: () => void;
+	} = $props();
 
-	let messages = $state<AgentMessage[]>([]);
-	let loading = $state(true);
-	let error = $state<string | null>(null);
-	let expandedMessages = $state<Set<string>>(new Set());
-	let scrollContainer = $state<HTMLDivElement>(undefined!);
-	let copyFeedback = $state<string | null>(null);
+	let messages: AgentMessage[] = $state([]);
+	let loading = $state(false);
+	let error = $state('');
 
-	const PREVIEW_LENGTH = 500;
+	const roleStyles: Record<string, { bg: string; text: string; align: string }> = {
+		user: {
+			bg: 'var(--color-surface-2)',
+			text: 'var(--color-text)',
+			align: 'left'
+		},
+		system: {
+			bg: 'var(--color-surface-2)',
+			text: 'var(--color-text)',
+			align: 'left'
+		},
+		assistant: {
+			bg: 'var(--color-primary)',
+			text: 'white',
+			align: 'right'
+		},
+		tool: {
+			bg: 'var(--color-surface)',
+			text: 'var(--color-text-muted)',
+			align: 'left'
+		}
+	};
 
-	async function loadMessages(id: string) {
+	$effect(() => {
+		if (agent_id) {
+			fetchMessages(agent_id);
+		} else {
+			messages = [];
+		}
+	});
+
+	async function fetchMessages(aid: string) {
 		loading = true;
-		error = null;
+		error = '';
 		try {
-			messages = await getAgentMessages(id);
+			const res = await fetch(`/api/agents/${aid}/messages`);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			messages = await res.json();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load messages';
 			messages = [];
@@ -26,151 +58,66 @@
 			loading = false;
 		}
 	}
-
-	function toggleExpand(messageId: string) {
-		const next = new Set(expandedMessages);
-		if (next.has(messageId)) {
-			next.delete(messageId);
-		} else {
-			next.add(messageId);
-		}
-		expandedMessages = next;
-	}
-
-	function isLong(content: string): boolean {
-		return content.length > PREVIEW_LENGTH;
-	}
-
-	function previewContent(content: string): string {
-		return content.slice(0, PREVIEW_LENGTH);
-	}
-
-	function formatTimestamp(ts: string): string {
-		return new Date(ts).toLocaleTimeString([], {
-			hour: '2-digit',
-			minute: '2-digit',
-			second: '2-digit'
-		});
-	}
-
-	async function copyText(text: string, label: string) {
-		try {
-			await navigator.clipboard.writeText(text);
-			copyFeedback = label;
-			setTimeout(() => { copyFeedback = null; }, 1500);
-		} catch {
-			// clipboard API may not be available
-		}
-	}
-
-	function copyMessage(msg: AgentMessage) {
-		copyText(msg.content, msg.message_id);
-	}
-
-	function copyAll() {
-		const text = messages
-			.map((m) => `[${m.role}] ${m.content}`)
-			.join('\n\n---\n\n');
-		copyText(text, '__all__');
-	}
-
-	$effect(() => {
-		if (agentId) {
-			loadMessages(agentId);
-		}
-	});
-
-	$effect(() => {
-		if (!loading && messages.length > 0 && scrollContainer) {
-			// Scroll to bottom after messages render
-			requestAnimationFrame(() => {
-				scrollContainer.scrollTop = scrollContainer.scrollHeight;
-			});
-		}
-	});
 </script>
 
-<div class="flex flex-col h-full">
-	{#if loading}
-		<div class="flex-1 flex items-center justify-center">
-			<span class="text-xs" style="color: var(--color-text-muted);">Loading messages...</span>
-		</div>
-	{:else if error}
-		<div class="flex-1 flex items-center justify-center">
-			<span class="text-xs" style="color: var(--color-error);">{error}</span>
-		</div>
-	{:else if messages.length === 0}
-		<div class="flex-1 flex items-center justify-center">
-			<span class="text-xs" style="color: var(--color-text-muted);">No messages captured</span>
-		</div>
-	{:else}
-		<!-- Copy All header -->
-		<div class="flex items-center justify-end px-3 py-2 border-b" style="border-color: var(--color-border);">
-			<button
-				onclick={copyAll}
-				class="text-xs cursor-pointer border-none px-2 py-1 rounded"
-				style="background: var(--color-surface-2); color: var(--color-text-muted);"
-			>
-				{copyFeedback === '__all__' ? 'Copied' : 'Copy All'}
-			</button>
-		</div>
+{#if agent_id}
+	<div
+		class="fixed top-12 right-0 bottom-0 overflow-y-auto z-40 border-l"
+		style="width: 400px; background: var(--color-surface); border-color: var(--color-border);"
+	>
+		<div class="p-4">
+			<div class="flex items-center justify-between mb-4">
+				<h3 class="text-sm font-semibold">Conversation</h3>
+				<button
+					onclick={onclose}
+					class="text-sm cursor-pointer border-none"
+					style="background: transparent; color: var(--color-text-muted);"
+				>&times;</button>
+			</div>
 
-		<!-- Messages -->
-		<div
-			bind:this={scrollContainer}
-			class="flex-1 overflow-y-auto px-3 py-3 space-y-3"
-		>
-			{#each messages as msg (msg.message_id)}
-				{@const isAssistant = msg.role === 'assistant'}
-				{@const expanded = expandedMessages.has(msg.message_id)}
-				{@const long = isLong(msg.content)}
-
-				<div class="flex {isAssistant ? 'justify-end' : 'justify-start'}">
-					<div
-						class="max-w-[85%] rounded-lg px-3 py-2"
-						style="background: {isAssistant
-							? 'rgba(10, 147, 150, 0.1)'
-							: 'var(--color-surface)'};"
-					>
-						<!-- Header: role badge + timestamp -->
-						<div class="flex items-center gap-2 mb-1">
-							<span
-								class="inline-block px-1.5 py-0.5 rounded text-xs font-medium"
-								style="background: var(--color-surface-2); color: var(--color-text-muted); font-size: 10px;"
-							>{msg.role}</span>
-							<span class="text-xs" style="color: var(--color-text-muted); font-size: 10px;">
-								{formatTimestamp(msg.timestamp)}
-							</span>
-						</div>
-
-						<!-- Content -->
+			{#if loading}
+				<div class="text-xs" style="color: var(--color-text-muted);">Loading messages...</div>
+			{:else if error}
+				<div class="text-xs" style="color: var(--color-error);">{error}</div>
+			{:else if messages.length === 0}
+				<div class="text-xs" style="color: var(--color-text-muted);">No messages captured for this agent.</div>
+			{:else}
+				<div class="space-y-3">
+					{#each messages as msg}
+						{@const style = roleStyles[msg.role] ?? roleStyles.tool}
 						<div
-							class="text-xs mt-1"
-							style="white-space: pre-wrap; word-break: break-word; color: var(--color-text);"
-						>{#if long && !expanded}{previewContent(msg.content)}{:else}{msg.content}{/if}</div>
-
-						<!-- Controls -->
-						<div class="flex items-center gap-2 mt-2">
-							{#if long}
-								<button
-									onclick={() => toggleExpand(msg.message_id)}
-									class="text-xs cursor-pointer border-none px-0 py-0"
-									style="background: transparent; color: var(--color-primary); font-size: 10px;"
-								>
-									{expanded ? 'Show less' : 'Show more'}
-								</button>
-							{/if}
-							<button
-								onclick={() => copyMessage(msg)}
-								class="text-xs cursor-pointer border-none px-0 py-0"
-								style="background: transparent; color: var(--color-text-muted); font-size: 10px;"
-							>
-								{copyFeedback === msg.message_id ? 'Copied' : 'Copy'}
-							</button>
+							class="text-xs"
+							style="text-align: {style.align};"
+						>
+							<div class="flex items-center gap-1 mb-1" style="justify-content: {style.align === 'right' ? 'flex-end' : 'flex-start'};">
+								<span
+									class="inline-block px-1.5 py-0.5 rounded text-xs font-medium"
+									style="background: {style.bg}; color: {style.text};"
+								>{msg.role}</span>
+								{#if msg.synthetic}
+									<span
+										class="inline-block px-1.5 py-0.5 rounded text-xs"
+										style="background: var(--color-surface-2); color: var(--color-text-muted); border: 1px dashed var(--color-border);"
+									>inferred</span>
+								{/if}
+								<span style="color: var(--color-text-muted); font-size: 10px;">
+									{new Date(msg.timestamp).toLocaleTimeString()}
+								</span>
+							</div>
+							<div
+								class="p-2 rounded text-xs overflow-y-auto"
+								style="
+									background: var(--color-bg);
+									max-height: 200px;
+									white-space: pre-wrap;
+									word-break: break-word;
+									{msg.synthetic ? 'border: 1px dashed var(--color-border); opacity: 0.8;' : 'border: 1px solid var(--color-border);'}
+								"
+							>{msg.content ?? msg.content_preview ?? ''}</div>
 						</div>
-					</div>
+					{/each}
 				</div>
-			{/each}
+			{/if}
 		</div>
-	{/if}
-</div>
+	</div>
+{/if}

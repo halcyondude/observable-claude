@@ -91,18 +91,6 @@ export interface QueryResult {
 	graph?: SessionGraph;
 }
 
-export type MessageRole = 'user' | 'assistant' | 'system';
-
-export interface AgentMessage {
-	message_id: string;
-	session_id: string;
-	agent_id: string;
-	role: MessageRole;
-	content: string;
-	sequence: number;
-	timestamp: string;
-}
-
 export interface ToolStats {
 	tool_name: string;
 	call_count: number;
@@ -110,6 +98,23 @@ export interface ToolStats {
 	fail_count: number;
 	p50_ms: number;
 	p95_ms: number;
+}
+
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
+
+export interface AgentMessage {
+	message_id: string;
+	event_id?: string;
+	session_id: string;
+	agent_id: string;
+	role: MessageRole;
+	sequence: number;
+	timestamp: string;
+	content?: string;
+	content_preview?: string;
+	content_bytes?: number;
+	synthetic?: boolean;
+	metadata?: Record<string, unknown>;
 }
 
 export interface MessageSearchResult {

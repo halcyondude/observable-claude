@@ -1,7 +1,9 @@
-import hashlib
 import re
 import uuid
 import json
+import hashlib
+from datetime import datetime, timezone
+
 import duckdb
 
 
@@ -22,6 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_pair ON events(tool_use_id);
 CREATE INDEX IF NOT EXISTS idx_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_time ON events(received_at);
+
 CREATE TABLE IF NOT EXISTS messages (
   message_id    VARCHAR PRIMARY KEY,
   event_id      VARCHAR,
@@ -29,10 +32,11 @@ CREATE TABLE IF NOT EXISTS messages (
   agent_id      VARCHAR NOT NULL,
   role          VARCHAR NOT NULL,
   sequence      INTEGER NOT NULL,
-  timestamp     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  timestamp     TIMESTAMPTZ NOT NULL,
   content       TEXT,
   content_hash  VARCHAR,
   content_bytes INTEGER,
+  synthetic     BOOLEAN DEFAULT FALSE,
   metadata      JSON
 );
 CREATE INDEX IF NOT EXISTS idx_msg_agent ON messages(agent_id);
@@ -139,38 +143,53 @@ def get_active_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     return [dict(zip(columns, row)) for row in rows]
 
 
+# --- Messages ---
+
+
+def _content_hash(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def get_next_sequence(conn: duckdb.DuckDBPyConnection, agent_id: str) -> int:
+    """Return the next sequence number for a given agent's messages."""
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sequence), -1) FROM messages WHERE agent_id = ?",
+        [agent_id],
+    ).fetchone()
+    return row[0] + 1 if row else 0
+
+
 def write_message(
     conn: duckdb.DuckDBPyConnection,
     *,
-    event_id: str | None,
     session_id: str,
     agent_id: str,
     role: str,
-    sequence: int,
-    content: str | None,
+    content: str,
+    event_id: str | None = None,
+    sequence: int | None = None,
+    synthetic: bool = False,
     metadata: dict | None = None,
 ) -> str:
     """Write a message to the messages table. Returns the message_id."""
     message_id = str(uuid.uuid4())
-    content_hash = hashlib.sha256(content.encode()).hexdigest() if content else None
-    content_bytes = len(content.encode()) if content else 0
+    if sequence is None:
+        sequence = get_next_sequence(conn, agent_id)
+    ts = datetime.now(timezone.utc)
+    content_h = _content_hash(content) if content else None
+    content_bytes = len(content.encode("utf-8")) if content else 0
+    meta_json = json.dumps(metadata) if metadata else None
 
     conn.execute(
         """
-        INSERT INTO messages (message_id, event_id, session_id, agent_id, role, sequence, content, content_hash, content_bytes, metadata)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages
+            (message_id, event_id, session_id, agent_id, role, sequence, timestamp,
+             content, content_hash, content_bytes, synthetic, metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            message_id,
-            event_id,
-            session_id,
-            agent_id,
-            role,
-            sequence,
-            content,
-            content_hash,
-            content_bytes,
-            json.dumps(metadata) if metadata else None,
+            message_id, event_id, session_id, agent_id, role, sequence, ts,
+            content, content_h, content_bytes, synthetic, meta_json,
         ],
     )
     return message_id
@@ -219,7 +238,7 @@ def search_messages(
     offset: int = 0,
 ) -> list[dict]:
     """Full-text search across message content. Returns results with snippets."""
-    clauses = ["regexp_matches(content, ?)"]
+    clauses = ["content IS NOT NULL", "contains(lower(content), lower(?))"]
     params: list = [q]
 
     if session_id:
@@ -263,28 +282,13 @@ def get_agent_messages(
     conn: duckdb.DuckDBPyConnection,
     agent_id: str,
 ) -> list[dict]:
-    """Get all messages for a specific agent, ordered by sequence."""
+    """Return all messages for an agent, ordered by sequence."""
     rows = conn.execute(
-        """
-        SELECT message_id, session_id, agent_id, role, sequence, timestamp,
-               content, content_bytes
-        FROM messages
-        WHERE agent_id = ?
-        ORDER BY sequence ASC
-        """,
+        "SELECT * FROM messages WHERE agent_id = ? ORDER BY sequence ASC",
         [agent_id],
     ).fetchall()
-
     columns = [desc[0] for desc in conn.description]
-    results = []
-    for row in rows:
-        rec = dict(zip(columns, row))
-        content = rec.pop("content", None) or ""
-        rec["content_preview"] = content[:500]
-        rec["content"] = content
-        results.append(rec)
-
-    return results
+    return [dict(zip(columns, row)) for row in rows]
 
 
 def get_session_messages(
@@ -315,3 +319,32 @@ def get_session_messages(
         results.append(rec)
 
     return results
+
+
+def get_agent_tool_summary(
+    conn: duckdb.DuckDBPyConnection,
+    agent_id: str,
+) -> dict:
+    """Summarize tool calls for an agent from the events table."""
+    rows = conn.execute(
+        """
+        SELECT tool_name,
+               COUNT(*) as call_count,
+               SUM(CASE WHEN event_type = 'PostToolUse' THEN 1 ELSE 0 END) as success_count,
+               SUM(CASE WHEN event_type = 'PostToolUseFailure' THEN 1 ELSE 0 END) as fail_count
+        FROM events
+        WHERE agent_id = ? AND event_type IN ('PostToolUse', 'PostToolUseFailure')
+        GROUP BY tool_name
+        """,
+        [agent_id],
+    ).fetchall()
+    total = sum(r[1] for r in rows)
+    tools = [r[0] for r in rows if r[0]]
+    successes = sum(r[2] for r in rows)
+    failures = sum(r[3] for r in rows)
+    return {
+        "total": total,
+        "tools": tools,
+        "successes": successes,
+        "failures": failures,
+    }

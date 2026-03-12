@@ -9,9 +9,9 @@ logger = logging.getLogger(__name__)
 DDL_STATEMENTS = [
     "CREATE NODE TABLE IF NOT EXISTS Session (session_id STRING, cwd STRING, start_ts STRING, end_ts STRING, PRIMARY KEY (session_id))",
     "CREATE NODE TABLE IF NOT EXISTS Agent (agent_id STRING, agent_type STRING, session_id STRING, start_ts STRING, end_ts STRING, status STRING, PRIMARY KEY (agent_id))",
-    "CREATE NODE TABLE IF NOT EXISTS Message (message_id STRING, role STRING, content_preview STRING, sequence INT64, timestamp STRING, content_bytes INT64, PRIMARY KEY (message_id))",
     "CREATE NODE TABLE IF NOT EXISTS Skill (name STRING, path STRING, PRIMARY KEY (name))",
     "CREATE NODE TABLE IF NOT EXISTS Tool (name STRING, PRIMARY KEY (name))",
+    "CREATE NODE TABLE IF NOT EXISTS Message (message_id STRING, agent_id STRING, session_id STRING, role STRING, sequence INT64, timestamp STRING, content_preview STRING, content_bytes INT64, synthetic BOOLEAN, PRIMARY KEY (message_id))",
     "CREATE REL TABLE IF NOT EXISTS SPAWNED (FROM Session TO Agent, FROM Agent TO Agent, prompt STRING, depth INT64, spawned_at STRING)",
     "CREATE REL TABLE IF NOT EXISTS LOADED (FROM Agent TO Skill, loaded_at STRING)",
     "CREATE REL TABLE IF NOT EXISTS INVOKED (FROM Agent TO Tool, tool_use_id STRING, tool_input STRING, start_ts STRING, end_ts STRING, duration_ms INT64, status STRING, tool_response STRING)",
@@ -78,6 +78,48 @@ def materialize_event(conn: Connection, event: dict) -> None:
         handler(conn, event)
     except Exception:
         logger.exception("Graph materialization failed for event_type=%s", event_type)
+
+
+def materialize_message(
+    conn: Connection,
+    *,
+    message_id: str,
+    agent_id: str,
+    session_id: str,
+    role: str,
+    sequence: int,
+    content_preview: str,
+    synthetic: bool = False,
+) -> None:
+    """Create a Message node and HAS_MESSAGE edge in the graph."""
+    ts = _now_iso()
+
+    conn.execute(
+        "MERGE (m:Message {message_id: $mid}) "
+        "SET m.agent_id = $aid, m.session_id = $sid, m.role = $role, "
+        "m.sequence = $seq, m.timestamp = $ts, m.content_preview = $preview, m.synthetic = $synthetic",
+        parameters={
+            "mid": message_id,
+            "aid": agent_id,
+            "sid": session_id,
+            "role": role,
+            "seq": sequence,
+            "ts": ts,
+            "preview": content_preview,
+            "synthetic": synthetic,
+        },
+    )
+
+    # Ensure agent exists before creating edge
+    conn.execute(
+        "MERGE (a:Agent {agent_id: $aid})",
+        parameters={"aid": agent_id},
+    )
+    conn.execute(
+        "MATCH (a:Agent {agent_id: $aid}), (m:Message {message_id: $mid}) "
+        "CREATE (a)-[:HAS_MESSAGE {sequence: $seq}]->(m)",
+        parameters={"aid": agent_id, "mid": message_id, "seq": sequence},
+    )
 
 
 # --- Per-event handlers ---

@@ -12,17 +12,11 @@ from sse_starlette.sse import EventSourceResponse
 from anthropic import Anthropic
 
 from .ledger import (
-    init_db,
-    write_event,
-    query_events,
-    get_sessions,
-    get_active_sessions,
-    write_message,
-    get_agent_messages,
-    search_messages,
-    get_session_messages,
+    init_db, write_event, query_events, get_sessions, get_active_sessions,
+    write_message, get_next_sequence, get_agent_messages, get_session_messages,
+    get_agent_tool_summary, search_messages,
 )
-from .graph import init_graph, materialize_event, get_session_graph, get_session_timeline, reset_graph
+from .graph import init_graph, materialize_event, materialize_message, get_session_graph, get_session_timeline, reset_graph
 from . import nl_query
 
 logger = logging.getLogger(__name__)
@@ -61,6 +55,211 @@ async def lifespan(application: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+def _truncate(text: str, max_len: int = 500) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "..."
+
+
+def _extract_field(payload: dict, nested_key: str, flat_key: str):
+    """Extract a value from nested event/session structure or flat top-level."""
+    parts = nested_key.split(".", 1)
+    if len(parts) == 2:
+        val = payload.get(parts[0], {}).get(parts[1])
+        if val is not None:
+            return val
+    return payload.get(flat_key)
+
+
+def _broadcast_sse(event_type: str, data: str) -> None:
+    dead = []
+    for q in _sse_clients:
+        try:
+            q.put_nowait((event_type, data))
+        except asyncio.QueueFull:
+            dead.append(q)
+    for q in dead:
+        _sse_clients.remove(q)
+
+
+def _write_and_materialize_message(
+    event_id: str,
+    session_id: str,
+    agent_id: str,
+    role: str,
+    content: str,
+    synthetic: bool = False,
+    metadata: dict | None = None,
+) -> str | None:
+    """Write a message to DuckDB and materialize in graph. Returns message_id."""
+    if not _db or not session_id or not agent_id:
+        return None
+
+    sequence = get_next_sequence(_db, agent_id)
+    message_id = write_message(
+        _db,
+        session_id=session_id,
+        agent_id=agent_id,
+        role=role,
+        content=content,
+        event_id=event_id,
+        sequence=sequence,
+        synthetic=synthetic,
+        metadata=metadata,
+    )
+
+    if _graph_conn:
+        try:
+            materialize_message(
+                _graph_conn,
+                message_id=message_id,
+                agent_id=agent_id,
+                session_id=session_id,
+                role=role,
+                sequence=sequence,
+                content_preview=_truncate(content),
+                synthetic=synthetic,
+            )
+        except Exception:
+            logger.exception("Message graph materialization failed for %s", message_id)
+
+    # Broadcast message SSE event
+    msg_data = json.dumps({
+        "message_id": message_id,
+        "agent_id": agent_id,
+        "session_id": session_id,
+        "role": role,
+        "sequence": sequence,
+        "synthetic": synthetic,
+        "content_preview": _truncate(content),
+    })
+    _broadcast_sse("message", msg_data)
+
+    return message_id
+
+
+def _handle_subagent_stop_message(event_id: str, payload: dict) -> None:
+    """Infer agent response from SubagentStop event."""
+    agent_id = _extract_field(payload, "session.agent_id", "agent_id")
+    session_id = _extract_field(payload, "session.session_id", "session_id")
+    if not agent_id or not session_id:
+        return
+
+    # Check for a result/output field (future hook enhancement)
+    result_text = _extract_field(payload, "event.result", "result")
+    output_text = _extract_field(payload, "event.output", "output")
+    response_text = result_text or output_text
+
+    if response_text:
+        if isinstance(response_text, dict):
+            response_text = json.dumps(response_text)
+        _write_and_materialize_message(
+            event_id=event_id,
+            session_id=session_id,
+            agent_id=agent_id,
+            role="assistant",
+            content=str(response_text),
+            synthetic=False,
+        )
+    else:
+        # Synthetic summary from tool activity
+        summary = get_agent_tool_summary(_db, agent_id)
+        tool_list = ", ".join(summary["tools"][:5]) if summary["tools"] else "none"
+        duration_ms = _extract_field(payload, "event.duration_ms", "duration_ms")
+        dur_str = f" Duration: {duration_ms}ms." if duration_ms else ""
+
+        content = (
+            f"Agent completed. {summary['total']} tool calls ({tool_list}). "
+            f"{summary['successes']} succeeded, {summary['failures']} failed.{dur_str}"
+        )
+        _write_and_materialize_message(
+            event_id=event_id,
+            session_id=session_id,
+            agent_id=agent_id,
+            role="assistant",
+            content=content,
+            synthetic=True,
+        )
+
+
+def _handle_pre_tool_message(event_id: str, payload: dict) -> None:
+    """Write a tool message for PreToolUse events."""
+    agent_id = _extract_field(payload, "session.agent_id", "agent_id")
+    session_id = _extract_field(payload, "session.session_id", "session_id")
+    tool_name = _extract_field(payload, "event.tool_name", "tool_name") or "unknown"
+    if not agent_id or not session_id:
+        return
+
+    tool_input_raw = _extract_field(payload, "event.tool_input", "tool_input")
+    if isinstance(tool_input_raw, dict):
+        input_str = json.dumps(tool_input_raw)
+    elif tool_input_raw is not None:
+        input_str = str(tool_input_raw)
+    else:
+        input_str = ""
+
+    content = f"Tool call: {tool_name}\nInput: {_truncate(input_str)}"
+    tool_use_id = _extract_field(payload, "event.tool_use_id", "tool_use_id")
+
+    _write_and_materialize_message(
+        event_id=event_id,
+        session_id=session_id,
+        agent_id=agent_id,
+        role="tool",
+        content=content,
+        synthetic=False,
+        metadata={"tool_name": tool_name, "tool_use_id": tool_use_id, "phase": "pre"},
+    )
+
+
+def _handle_post_tool_message(event_id: str, payload: dict) -> None:
+    """Write a tool message for PostToolUse events."""
+    agent_id = _extract_field(payload, "session.agent_id", "agent_id")
+    session_id = _extract_field(payload, "session.session_id", "session_id")
+    tool_name = _extract_field(payload, "event.tool_name", "tool_name") or "unknown"
+    if not agent_id or not session_id:
+        return
+
+    event_type = _extract_field(payload, "event.event_type", "event_type") or "PostToolUse"
+    status = "failed" if "Failure" in event_type else "success"
+    duration_ms = _extract_field(payload, "event.duration_ms", "duration_ms") or 0
+
+    tool_response_raw = _extract_field(payload, "event.tool_response", "tool_response")
+    if isinstance(tool_response_raw, dict):
+        output_str = json.dumps(tool_response_raw)
+    elif tool_response_raw is not None:
+        output_str = str(tool_response_raw)
+    else:
+        output_str = ""
+
+    content = (
+        f"Tool result: {tool_name}\n"
+        f"Status: {status}\n"
+        f"Duration: {duration_ms}ms\n"
+        f"Output: {_truncate(output_str)}"
+    )
+    tool_use_id = _extract_field(payload, "event.tool_use_id", "tool_use_id")
+
+    _write_and_materialize_message(
+        event_id=event_id,
+        session_id=session_id,
+        agent_id=agent_id,
+        role="tool",
+        content=content,
+        synthetic=False,
+        metadata={"tool_name": tool_name, "tool_use_id": tool_use_id, "phase": "post", "status": status},
+    )
+
+
+# Message handlers keyed by event type
+_MESSAGE_HANDLERS = {
+    "SubagentStop": _handle_subagent_stop_message,
+    "PreToolUse": _handle_pre_tool_message,
+    "PostToolUse": _handle_post_tool_message,
+    "PostToolUseFailure": _handle_post_tool_message,
+}
+
+
 @app.post("/events")
 async def ingest_event(request: Request):
     payload = await request.json()
@@ -73,17 +272,17 @@ async def ingest_event(request: Request):
         except Exception:
             logger.exception("Graph materialization failed for event %s", event_id)
 
+    # Message extraction — best-effort
     event_type = payload.get("event", {}).get("event_type", payload.get("event_type", "unknown"))
-    sse_data = json.dumps({"event_id": event_id, **payload})
-
-    dead = []
-    for q in _sse_clients:
+    msg_handler = _MESSAGE_HANDLERS.get(event_type)
+    if msg_handler:
         try:
-            q.put_nowait((event_type, sse_data))
-        except asyncio.QueueFull:
-            dead.append(q)
-    for q in dead:
-        _sse_clients.remove(q)
+            msg_handler(event_id, payload)
+        except Exception:
+            logger.exception("Message extraction failed for event %s", event_id)
+
+    sse_data = json.dumps({"event_id": event_id, **payload})
+    _broadcast_sse(event_type, sse_data)
 
     return {"event_id": event_id, "status": "ok"}
 
@@ -178,7 +377,6 @@ async def message_search(
 
 @app.get("/api/agents/{agent_id}/messages")
 async def agent_messages(agent_id: str):
-    """Get all messages for a specific agent."""
     return get_agent_messages(_db, agent_id)
 
 
