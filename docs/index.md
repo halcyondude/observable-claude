@@ -3,20 +3,20 @@ title: CC Observer Documentation
 description: Real-time execution graph monitoring for Claude Code — documentation home
 ---
 
-# CC Observer Documentation
+# CC Observer
 
-Real-time execution graph monitoring for Claude Code. Captures every lifecycle event, builds a live property graph, and serves a dashboard for understanding what your agents are doing.
+Real-time execution graph monitoring for Claude Code. Every lifecycle event captured, materialized into a live property graph, served on a dashboard. You see exactly what your agents are doing.
 
-## Quick Navigation
+## Docs
 
-- **[Vision](vision.md)** — The problem we're solving, who this is for, and the design principles behind CC Observer
-- **[Architecture](architecture.md)** — System design, event lifecycle, storage strategy, Docker topology
-- **[Technical Specification](technical-spec.md)** — Graph schema, DuckDB schema, full API reference, hook event catalog, NL-to-Cypher pipeline
-- **[UX & Dashboard Guide](ux.md)** — Six dashboard views, design system, interaction patterns, responsive behavior
-- **[FAQ](faq.md)** — Answers to common questions about installation, performance, data storage, and extensibility
-- **[Contributing](contributing.md)** — Development setup, project structure, how to add event handlers and views
+- **[Vision](vision.md)** — Why this exists, who it's for, design principles
+- **[Architecture](architecture.md)** — System design, event lifecycle, storage, Docker topology
+- **[Technical Spec](technical-spec.md)** — Graph schema, DuckDB schema, API reference, hook events, NL-to-Cypher
+- **[UX & Dashboard](ux.md)** — Six views, design system, interaction patterns
+- **[FAQ](faq.md)** — Installation, performance, data, querying, extensibility
+- **[Contributing](contributing.md)** — Dev setup, project structure, adding handlers and views
 
-## At a Glance
+## Stack
 
 | Component | Technology | Purpose |
 |---|---|---|
@@ -24,11 +24,11 @@ Real-time execution graph monitoring for Claude Code. Captures every lifecycle e
 | Event Ledger | DuckDB | Immutable source of truth for all hook events |
 | Execution Graph | LadybugDB | Labeled property graph for topology queries |
 | Dashboard | SvelteKit + Cytoscape.js | Real-time visualization across 6 views |
-| Infrastructure | Docker Compose | Single-command deployment of the full stack |
+| Infrastructure | Docker Compose | Single-command deployment |
 | Plugin | Claude Code hooks + commands | Automatic event capture and CLI management |
 | NL Query | Anthropic API | Natural language to Cypher translation |
 
-## Getting Started
+## Quickstart
 
 ```bash
 git clone https://github.com/halcyondude/observable-claude.git
@@ -38,4 +38,4 @@ docker compose up -d
 open http://localhost:3000
 ```
 
-See the [main README](https://github.com/halcyondude/observable-claude#readme) for the full quickstart.
+Full quickstart in the [README](https://github.com/halcyondude/observable-claude#readme).

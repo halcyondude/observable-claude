@@ -5,14 +5,14 @@ description: Development setup, project structure, how to add event handlers and
 
 # Contributing
 
-## Development Setup
+## Dev Setup
 
 ### Prerequisites
 
 - Docker and Docker Compose
-- Python 3.12+ (for running collector tests locally)
-- Node.js 20+ (for dashboard development)
-- Claude Code with plugin support (for end-to-end testing)
+- Python 3.12+ (collector tests)
+- Node.js 20+ (dashboard dev)
+- Claude Code with plugin support (E2E testing)
 
 ### Clone and Start
 
@@ -20,20 +20,18 @@ description: Development setup, project structure, how to add event handlers and
 git clone https://github.com/halcyondude/observable-claude.git
 cd observable-claude
 
-# Start the full stack
-export ANTHROPIC_API_KEY=sk-ant-...  # optional, only needed for NL queries
+export ANTHROPIC_API_KEY=sk-ant-...  # optional, only for NL queries
 docker compose up -d
 
-# Verify
 curl http://localhost:4001/health
-# → {"status": "ok", "events_total": 0, "uptime_seconds": ...}
+# {"status": "ok", "events_total": 0, "uptime_seconds": ...}
 
 open http://localhost:3000
 ```
 
-### Local Collector Development
+### Local Collector Dev
 
-For faster iteration on the collector without rebuilding the Docker image:
+Faster iteration without Docker rebuilds:
 
 ```bash
 cd collector
@@ -41,19 +39,18 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Run locally (uses ./data/ relative to project root)
 DUCKDB_PATH=../data/duckdb/events.db LADYBUG_PATH=../data/ladybug \
     uvicorn collector:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Local Dashboard Development
+### Local Dashboard Dev
 
 ```bash
 cd dashboard
 npm install
 npm run dev
-# Dashboard at http://localhost:5173 with HMR
-# Set PUBLIC_COLLECTOR_URL=http://localhost:4002 in .env for API proxying
+# http://localhost:5173 with HMR
+# Set PUBLIC_COLLECTOR_URL=http://localhost:4002 in .env
 ```
 
 ## Project Structure
@@ -63,7 +60,7 @@ cc-observer/
 ├── .claude-plugin/
 │   └── plugin.json              # Plugin manifest
 ├── hooks/
-│   └── hooks.json               # Hook configuration (12 event types)
+│   └── hooks.json               # 12 event types
 ├── commands/
 │   ├── oc-setup.md              # /oc:setup
 │   ├── oc-start.md              # /oc:start
@@ -72,47 +69,47 @@ cc-observer/
 │   └── oc-query.md              # /oc:query [question]
 ├── skills/
 │   └── observer-context/
-│       └── SKILL.md             # Graph schema + query patterns for Claude
+│       └── SKILL.md             # Graph schema + query patterns
 ├── agents/
 │   └── observer-analyst.md      # Post-session analysis agent
 ├── collector/
 │   ├── __init__.py
-│   ├── collector.py             # FastAPI app — endpoints, SSE, lifecycle
-│   ├── ledger.py                # DuckDB operations — write, query, sessions
-│   ├── graph.py                 # LadybugDB — DDL, mutations, graph queries
-│   ├── nl_query.py              # NL→Cypher via Anthropic API
+│   ├── collector.py             # FastAPI app
+│   ├── ledger.py                # DuckDB ops
+│   ├── graph.py                 # LadybugDB mutations + queries
+│   ├── nl_query.py              # NL-to-Cypher
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── dashboard/
 │   ├── src/
-│   │   ├── routes/              # SvelteKit pages (one per view)
+│   │   ├── routes/              # SvelteKit pages
 │   │   ├── lib/
-│   │   │   ├── components/      # Svelte components
-│   │   │   ├── stores/          # Svelte stores (session, events, connection)
+│   │   │   ├── components/
+│   │   │   ├── stores/          # session, events, connection
 │   │   │   └── services/        # SSE client, API wrappers
-│   │   └── app.css              # Design tokens as CSS custom properties
-│   ├── Dockerfile               # Multi-stage: Node build → nginx serve
-│   ├── nginx.conf               # Reverse proxy: /api/* and /stream → collector
+│   │   └── app.css              # Design tokens
+│   ├── Dockerfile               # Multi-stage: Node build -> nginx
+│   ├── nginx.conf               # Proxy /api/*, /stream -> collector
 │   └── package.json
 ├── scripts/
 │   ├── setup.sh                 # docker compose up + health check
 │   ├── teardown.sh              # docker compose down
-│   ├── emit_event.py            # Command hook fallback (JSONL + HTTP retry)
+│   ├── emit_event.py            # Command hook fallback
 │   ├── replay.py                # Rebuild LadybugDB from DuckDB
-│   └── smoke_test.sh            # End-to-end verification
-├── data/                        # Gitignored — DuckDB + LadybugDB data
+│   └── smoke_test.sh            # E2E verification
+├── data/                        # Gitignored
 ├── docker-compose.yml
-├── .mcp.json                    # LadybugDB MCP server registration
+├── .mcp.json                    # LadybugDB MCP server
 └── README.md
 ```
 
-## How to Add a New Event Handler
+## Adding a New Event Handler
 
 When Claude Code introduces a new hook event type:
 
-### Step 1: Hook Configuration
+### 1. Hook Configuration
 
-Add the new event to `hooks/hooks.json`:
+Add to `hooks/hooks.json`:
 
 ```json
 "NewEventType": [
@@ -125,59 +122,56 @@ Add the new event to `hooks/hooks.json`:
 ]
 ```
 
-Omit the command fallback for events that should not spawn subprocesses (e.g., during permission dialogs).
+Omit command fallback for events that shouldn't spawn subprocesses.
 
-### Step 2: Graph Mutation (if applicable)
+### 2. Graph Mutation
 
-Add a handler function in `collector/graph.py`:
+Handler in `collector/graph.py`:
 
 ```python
 def _handle_new_event(conn: Connection, event: dict) -> None:
-    # Extract fields using _extract() helper
     some_id = _extract(event, "event.some_id", "some_id")
-    # Execute Cypher mutation
     conn.execute(
         "MATCH (a:Agent {agent_id: $aid}) SET a.some_property = $val",
         parameters={"aid": some_id, "val": "..."},
     )
 ```
 
-Register in the `_HANDLERS` dict:
+Register in `_HANDLERS`:
 
 ```python
 _HANDLERS = {
-    # ... existing handlers ...
+    # ...
     "NewEventType": _handle_new_event,
 }
 ```
 
-For DuckDB-only events (no graph mutation), add a no-op:
+DuckDB-only (no graph mutation):
 
 ```python
 "NewEventType": lambda conn, event: None,
 ```
 
-### Step 3: Update the Skill
+### 3. Update the Skill
 
-Add the new event to `skills/observer-context/SKILL.md` so Claude knows about it when answering graph queries.
+Add the event to `skills/observer-context/SKILL.md` so Claude knows about it.
 
-No changes needed in `ledger.py` — the DuckDB writer extracts fields generically from the nested/flat payload structure and stores the complete JSON in the `payload` column.
+No `ledger.py` changes needed — field extraction is generic, full payload JSON always stored.
 
-## How to Add a New Dashboard View
+## Adding a New Dashboard View
 
-### Step 1: Create the Route
+### 1. Create the Route
 
 ```bash
 mkdir -p dashboard/src/routes/my-view
 ```
 
-Create `+page.svelte` with the view implementation:
+`+page.svelte`:
 
 ```svelte
 <script lang="ts">
   import { events } from '$lib/stores/events';
   import { session } from '$lib/stores/session';
-  // View logic
 </script>
 
 <div class="view-container">
@@ -185,75 +179,68 @@ Create `+page.svelte` with the view implementation:
 </div>
 ```
 
-### Step 2: Add Navigation
+### 2. Navigation
 
-In `dashboard/src/lib/components/Sidebar.svelte`, add the new nav item:
+In `Sidebar.svelte`:
 
 ```svelte
 <NavItem href="/my-view" icon={MyIcon} label="My View" shortcut="Cmd+7" />
 ```
 
-### Step 3: Add Keyboard Shortcut
+### 3. Keyboard Shortcut
 
-In `dashboard/src/routes/+layout.svelte`, add the shortcut handler:
+In `+layout.svelte`:
 
 ```typescript
 case '7': goto('/my-view'); break;
 ```
 
-### Step 4: Wire Data
+### 4. Wire Data
 
-Connect to the appropriate data source:
-- **Real-time data:** Subscribe to the events store (fed by SSE)
-- **On-demand data:** Fetch from REST endpoints via `$lib/services/api.ts`
-- **Both:** Most views use SSE for live updates and REST for initial state
+- **Real-time:** Subscribe to events store (SSE-fed)
+- **On-demand:** Fetch from REST via `$lib/services/api.ts`
+- **Both:** Most views use SSE for live + REST for initial state
 
 ## Testing
 
-### Collector Tests
+### Collector
 
 ```bash
 cd collector
 python -m pytest tests/ -v
 ```
 
-Key test areas:
-- `ledger.py` — event writing, querying, session aggregation
-- `graph.py` — DDL initialization, per-event Cypher mutations, graph queries
-- `collector.py` — endpoint integration tests with test client
+Key areas: `ledger.py` (write, query, sessions), `graph.py` (DDL, mutations, queries), `collector.py` (endpoint integration).
 
 ### Smoke Test
 
-The end-to-end smoke test verifies the full event pipeline:
+Full pipeline verification:
 
 ```bash
 bash scripts/smoke_test.sh
 ```
 
-This simulates a complete session (SessionStart through SessionEnd) and verifies events land in DuckDB, the graph materializes correctly, and the SSE stream delivers events.
+Simulates a complete session (SessionStart through SessionEnd), verifies DuckDB writes, graph materialization, and SSE delivery.
 
-### Dashboard Tests
+### Dashboard
 
 ```bash
 cd dashboard
 npm run test        # Unit tests
-npm run test:e2e    # Playwright end-to-end (if configured)
+npm run test:e2e    # Playwright E2E
 ```
 
 ## PR Workflow
 
-1. Create a feature branch from `main`
-2. Make your changes with clear, descriptive commits
-3. Run the smoke test and any relevant unit tests
-4. Open a PR with:
-   - A short title (under 70 characters)
-   - Description of what changed and why
-   - Test plan (how to verify the change works)
-5. Ensure the Docker stack starts cleanly with your changes: `docker compose build && docker compose up -d`
+1. Feature branch from `main`
+2. Clear, descriptive commits
+3. Run smoke test + relevant unit tests
+4. PR with short title (<70 chars), description of what/why, test plan
+5. Verify Docker stack starts clean: `docker compose build && docker compose up -d`
 
 ## Code Style
 
-- **Python:** Follow existing patterns in the collector. Use type hints. Docstrings on public functions.
-- **TypeScript/Svelte:** Follow SvelteKit conventions. Use TypeScript for all new code. CSS custom properties for theming.
-- **Cypher:** Use parameterized queries (`$param` syntax). MERGE for idempotent creates. MATCH + SET for updates.
-- **Commit messages:** Start with a type prefix: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`.
+- **Python:** Follow existing collector patterns. Type hints. Docstrings on public functions.
+- **TypeScript/Svelte:** SvelteKit conventions. TypeScript for all new code. CSS custom properties.
+- **Cypher:** Parameterized queries (`$param`). MERGE for idempotent creates. MATCH + SET for updates.
+- **Commits:** Type prefix: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`.

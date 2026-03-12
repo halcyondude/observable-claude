@@ -3,14 +3,13 @@ title: UX & Dashboard Guide
 description: Six dashboard views, design system, interaction patterns, and responsive behavior
 ---
 
-# UX & Dashboard Guide
+# UX & Dashboard
 
 ## Overview
 
-The CC Observer dashboard is a local-only, read-only, real-time monitoring tool. It runs at `http://localhost:3000` as a companion to the developer's terminal. Six views answer different questions about agent execution.
+Local-only, read-only, real-time monitoring at `http://localhost:3000`. Six views, each answering a different question about agent execution. Runs as a companion to your terminal.
 
 ```mermaid
-%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#0A9396'}}}%%
 stateDiagram-v2
     [*] --> SpawnTree : Default view
 
@@ -67,69 +66,60 @@ stateDiagram-v2
 
 ## Data Flow
 
-All views consume data from two sources: the SSE stream (real-time push) and the REST API (on-demand fetch).
+All views consume SSE (real-time push) and REST (on-demand fetch).
 
 ```mermaid
-%%{init: {'theme': 'dark'}}%%
-flowchart TD
+flowchart TB
     subgraph SOURCES ["Data Sources"]
-        SSE["SSE /stream<br/>Real-time push"]:::source
-        REST_SESS["GET /api/sessions"]:::source
-        REST_GRAPH["GET /api/sessions/id/graph"]:::source
-        REST_TIME["GET /api/sessions/id/timeline"]:::source
-        REST_EVENTS["GET /api/events"]:::source
-        REST_ASK["POST /api/ask"]:::source
-        REST_CYPHER["POST /api/cypher"]:::source
+        SSE["SSE /stream"]
+        REST_S["GET /api/sessions"]
+        REST_G["GET .../graph"]
+        REST_T["GET .../timeline"]
+        REST_E["GET /api/events"]
+        REST_A["POST /api/ask"]
+        REST_C["POST /api/cypher"]
     end
 
     subgraph STORES ["Client Stores"]
-        EVT_STORE["Event Store<br/>Ring buffer 10k events"]:::store
-        SESS_STORE["Session Store<br/>Active session state"]:::store
-        CONN_STORE["Connection Store<br/>SSE status"]:::store
+        EVT["Event Store<br/>10k ring buffer"]
+        SESS["Session Store"]
+        CONN["Connection Store"]
     end
 
-    subgraph VIEWS ["Dashboard Views"]
-        V1["Spawn Tree<br/>Cytoscape.js canvas"]:::view
-        V2["Timeline<br/>Gantt bars"]:::view
-        V3["Tool Feed<br/>Scrolling event list"]:::view
-        V4["Analytics<br/>Charts + stat cards"]:::view
-        V5["Query Console<br/>NL + Cypher editor"]:::view
-        V6["Session History<br/>Session list + detail"]:::view
+    subgraph VIEWS ["Views"]
+        V1["Spawn Tree"]
+        V2["Timeline"]
+        V3["Tool Feed"]
+        V4["Analytics"]
+        V5["Query Console"]
+        V6["Session History"]
     end
 
-    SSE --> EVT_STORE
-    SSE --> CONN_STORE
-    REST_SESS --> SESS_STORE
-    REST_SESS --> V6
+    SSE --> EVT
+    SSE --> CONN
+    REST_S --> SESS
+    REST_S --> V6
 
-    EVT_STORE --> V1
-    EVT_STORE --> V2
-    EVT_STORE --> V3
-    EVT_STORE --> V4
+    EVT --> V1
+    EVT --> V2
+    EVT --> V3
+    EVT --> V4
 
-    REST_GRAPH --> V1
-    REST_TIME --> V2
-    REST_EVENTS --> V4
-    REST_ASK --> V5
-    REST_CYPHER --> V5
-    SESS_STORE --> V1
-    SESS_STORE --> V2
-    SESS_STORE --> V6
-
-    classDef source fill:#1E293B,stroke:#0A9396,color:#F4F8FB
-    classDef store fill:#2D3E50,stroke:#EE9B00,color:#F4F8FB
-    classDef view fill:#1E293B,stroke:#94D2BD,color:#F4F8FB
-
-    style SOURCES fill:#0D1B2A,stroke:#64748B,color:#F4F8FB
-    style STORES fill:#0D1B2A,stroke:#64748B,color:#F4F8FB
-    style VIEWS fill:#0D1B2A,stroke:#64748B,color:#F4F8FB
+    REST_G --> V1
+    REST_T --> V2
+    REST_E --> V4
+    REST_A --> V5
+    REST_C --> V5
+    SESS --> V1
+    SESS --> V2
+    SESS --> V6
 ```
 
 ## View 1: Spawn Tree
 
-**Question answered:** What agents are running and how are they related?
+**What agents are running and how are they related?**
 
-The default view. A live directed graph rendered with Cytoscape.js using dagre layout (top-to-bottom hierarchy). The session node is the root; agents are children connected by SPAWNED edges.
+Default view. Live directed graph via Cytoscape.js, dagre layout (top-to-bottom). Session node at root, agents as children connected by SPAWNED edges.
 
 **Node states:**
 
@@ -140,76 +130,70 @@ The default view. A live directed graph rendered with Cytoscape.js using dagre l
 | Complete agent | Dark gray `#1E293B` | Muted | None (faded) |
 | Failed agent | Coral `#CA6702` | White | Brief flash, then static |
 
-**Node sizing:** Proportional to number of tool calls (min 80px, max 160px width).
+**Node sizing:** Proportional to tool call count (80px min, 160px max).
 
-**Edge design:** Directed arrows, teal `#0A9396`, 1.5px uniform width. Prompt text (first 40 chars) shown on hover only.
+**Edges:** Directed arrows, teal `#0A9396`, 1.5px. Prompt text (first 40 chars) on hover.
 
 **Interactions:**
-- Click a node to open the detail panel (320px slide-in from right)
-- Pan/zoom the canvas freely; auto-layout pauses when you pan
-- Click "Reset" to restore auto-layout
+- Click node to open detail panel (320px slide-in from right)
+- Pan/zoom freely; auto-layout pauses on pan
+- Reset button restores auto-layout
 - Floating controls: zoom in/out/fit/reset
 - Floating legend: node color meanings
 
-**Node detail panel:**
-- Agent ID (full, monospace)
-- Agent type, status badge
-- Started time (absolute + relative)
-- Duration (live counter if running)
-- Spawned by (with link to parent)
+**Detail panel:**
+- Agent ID (monospace), type, status badge
+- Start time (absolute + relative), duration (live counter if running)
+- Spawned by (link to parent)
 - Full prompt text (scrollable)
 - Tools invoked (count + list with call counts)
-- Skills loaded (list)
+- Skills loaded
 
 ## View 2: Timeline (Gantt)
 
-**Question answered:** How long has each agent been running? Where are the bottlenecks?
+**How long has each agent been running? Where are the bottlenecks?**
 
-Horizontal bars on a shared time axis. Makes parallelism and sequential bottlenecks immediately visible.
+Horizontal bars on a shared time axis. Parallelism and sequential bottlenecks immediately visible.
 
 **Layout:**
 - Left column (200px): agent labels, indented 16px per spawn depth
-- Right area: scrollable Gantt canvas with shared time axis at top
-- Each row is 32px tall with 4px gap
-- Time axis auto-scales (1s, 5s, 30s, 1m, 5m intervals)
+- Right: scrollable Gantt canvas with shared time axis
+- Rows: 32px tall, 4px gap
+- Time axis auto-scales (1s, 5s, 30s, 1m, 5m)
 - Current time: thin teal vertical line at right edge, moves live
 
-**Bar colors:**
-- Running: teal fill, right edge animated (growing)
-- Complete: dark gray fill
-- Failed: coral fill with X icon at right end
+**Bar colors:** Running = teal (right edge animated), Complete = dark gray, Failed = coral with X icon.
 
-**Tool call markers:** Small ticks on each bar (2px wide x 12px tall). Teal for success, coral for failure. Hover shows tool name, duration, and input summary.
+**Tool markers:** 2px x 12px ticks on each bar. Teal for success, coral for failure. Hover shows tool name, duration, input summary.
 
 ## View 3: Tool Feed
 
-**Question answered:** What tool calls are happening right now?
+**What tool calls are happening right now?**
 
-A scrolling reverse-chronological event log filtered to `PreToolUse`, `PostToolUse`, and `PostToolUseFailure` events.
+Reverse-chronological event log filtered to `PreToolUse`, `PostToolUse`, `PostToolUseFailure`.
 
 **Event row (48px collapsed):**
 - 4px colored left border (teal = Pre, green = Post success, coral = Failure)
-- Timestamp (`HH:MM:SS.mmm`, monospace, muted)
+- Timestamp `HH:MM:SS.mmm` (monospace, muted)
 - Event type pill (`PRE` / `POST` / `FAIL`)
-- Tool name (bold)
-- Agent type (muted)
+- Tool name (bold), agent type (muted)
 - Duration (right-aligned, PostToolUse only)
-- Summary line (first 60 chars of key input field)
+- Summary (first 60 chars of key input)
 
-**Expanded row (click to expand):**
+**Expanded row (click):**
 - Full `tool_input` as syntax-highlighted JSON
-- `tool_response` summary (truncated at 500 chars, "show more" link)
+- `tool_response` summary (500 char limit, "show more" link)
 - Correlation IDs: `agent_id`, `session_id`, `tool_use_id`
 
-**Filter bar:** Event type multi-select pills, tool name autocomplete, status filter. All filters apply live.
+**Filter bar:** Event type multi-select pills, tool name autocomplete, status filter. All filters live.
 
-**Pause button:** Freezes scroll to let you read without new events pushing content. Auto-pauses when you scroll up.
+**Pause button:** Freezes scroll. Auto-pauses when you scroll up.
 
 ## View 4: Analytics
 
-**Question answered:** What are the performance patterns?
+**What are the performance patterns?**
 
-Aggregated metrics from DuckDB analytics queries. Time range selector: Last 5m / 30m / 1h / Session / All time.
+Aggregated metrics from DuckDB. Time range selector: 5m / 30m / 1h / Session / All.
 
 **Stat cards (2x2 responsive grid):**
 
@@ -217,52 +201,52 @@ Aggregated metrics from DuckDB analytics queries. Time range selector: Last 5m /
 |---|---|---|
 | Total Events | Count | Delta vs previous period |
 | Active Agents | Live count (green) | + completed today |
-| Tool Success Rate | Percentage | Color: >95% green, <80% red |
-| Median Tool Latency | p50 in ms | p95 in smaller text below |
+| Tool Success Rate | Percentage | >95% green, <80% red |
+| Median Latency | p50 ms | p95 below |
 
-**Tool latency chart:** Horizontal bars, one row per tool. Bar = p50, extended segment = p95. Color-coded: teal (<100ms), amber (100-500ms), coral (>500ms). Sorted worst-first.
+**Tool latency chart:** Horizontal bars per tool. Bar = p50, extended = p95. Teal (<100ms), amber (100-500ms), coral (>500ms). Sorted worst-first.
 
-**Event rate chart:** Stacked area chart of events per 10-second bucket over selected time range, broken down by event type.
+**Event rate chart:** Stacked area, events per 10s bucket, broken down by type.
 
-**Per-tool table:** Tool name, calls (success/fail), latency p50/p95. Sortable columns.
+**Per-tool table:** Tool name, calls (success/fail), latency p50/p95. Sortable.
 
 ## View 5: Query Console
 
-**Question answered:** Whatever you want to ask.
+**Whatever you want to ask.**
 
 Two modes: Natural Language and Cypher.
 
-**Natural Language mode:**
+**Natural Language:**
 - Text input with placeholder examples
-- "Ask" button (keyboard: `Cmd+Enter`)
-- Generated Cypher shown in collapsible code block with syntax highlighting
-- One-line plain-English explanation
-- Example query chips: "Which agents are currently running?", "Show me the spawn tree", "What tool calls failed?", "Which skills were loaded most often?", "What was the slowest tool call?"
+- "Ask" button (`Cmd+Enter`)
+- Generated Cypher in collapsible code block
+- One-line explanation
+- Example chips: "Which agents are running?", "Show spawn tree", "Failed tool calls?", "Most loaded skills?", "Slowest tool call?"
 
-**Cypher mode:**
-- Code editor with Cypher syntax highlighting
-- Collapsible schema sidebar showing all node labels, relationship types, and properties
+**Cypher:**
+- Code editor with syntax highlighting
+- Collapsible schema sidebar: node labels, relationship types, properties
 - Direct execution via `POST /api/cypher`
 
-**Results panel:**
-- Tabular results: data table with sortable columns, copy-to-CSV button
-- Graph results: mini Cytoscape.js canvas with same node styling as Spawn Tree
-- Empty results: "No results" (not an error state)
-- Query history: last 20 queries in localStorage, accessible via dropdown
+**Results:**
+- Tabular: sortable columns, copy-to-CSV
+- Graph: mini Cytoscape.js canvas, same styling as Spawn Tree
+- Empty: "No results" (not an error)
+- History: last 20 queries in localStorage
 
 ## View 6: Session History
 
-**Question answered:** What happened in past sessions?
+**What happened in past sessions?**
 
-**Left panel (320px):** Session list, sorted newest first.
+**Left panel (320px):** Session list, newest first.
 
-Session list item:
-- Status indicator: green dot (active), gray dot (completed)
-- Primary text: `cwd` (last path segment bold, full path below)
-- Metadata: start time, duration, agent count, event count
-- Active session: teal left border, "LIVE" badge
+Each item:
+- Status dot: green (active), gray (completed)
+- `cwd` (last path segment bold, full path below)
+- Start time, duration, agent count, event count
+- Active session: teal border, "LIVE" badge
 
-**Session switching:** Clicking a past session switches all five other views to that session's data. A banner appears: "Viewing archived session — [session_id] [date]" with a "Return to live" button. Past sessions show final state (all agents complete).
+**Session switching:** Click a past session, all five views switch to that session's data. Banner: "Viewing archived session — [session_id] [date]" with "Return to live" button. Past sessions show final state.
 
 ## Design System
 
@@ -270,16 +254,16 @@ Session list item:
 
 | Token | Hex | Usage |
 |---|---|---|
-| `--color-primary` | `#0A9396` | Teal — running agents, active elements, links |
+| `--color-primary` | `#0A9396` | Teal — running, active, links |
 | `--color-bg` | `#0D1B2A` | Navy — app background |
 | `--color-surface` | `#1E293B` | Cards, panels, sidebars |
-| `--color-surface-2` | `#2D3E50` | Inputs, code blocks, hover states |
-| `--color-success` | `#94D2BD` | Mint — completed agents, success states |
+| `--color-surface-2` | `#2D3E50` | Inputs, code blocks, hover |
+| `--color-success` | `#94D2BD` | Mint — completed, success |
 | `--color-warning` | `#EE9B00` | Amber — medium latency, caution |
-| `--color-error` | `#CA6702` | Coral — failed agents/tools, errors |
+| `--color-error` | `#CA6702` | Coral — failed, errors |
 | `--color-text` | `#F4F8FB` | Near-white — primary text |
-| `--color-text-muted` | `#64748B` | Gray — secondary labels, timestamps |
-| `--color-border` | `#1E3A4A` | Subtle borders between panels |
+| `--color-text-muted` | `#64748B` | Gray — secondary labels |
+| `--color-border` | `#1E3A4A` | Subtle borders |
 
 ### Typography
 
@@ -287,70 +271,70 @@ Session list item:
 |---|---|---|
 | Display | Inter 24px Bold | View titles, section headers |
 | Label | Inter 14px Medium | Card labels, nav items, column headers |
-| Body | Inter 13px Regular | Event descriptions, panel text |
-| Caption | Inter 11px Regular | Timestamps, metadata, muted info |
-| Code | JetBrains Mono 12px | Cypher queries, JSON payloads, IDs |
+| Body | Inter 13px Regular | Descriptions, panel text |
+| Caption | Inter 11px Regular | Timestamps, metadata |
+| Code | JetBrains Mono 12px | Cypher, JSON, IDs |
 | Monospace data | JetBrains Mono 13px | `agent_id`, `tool_use_id`, `session_id` |
 
-### Component Reference
+### Components
 
 **Status Badge:**
 
 | Variant | Visual | Size |
 |---|---|---|
-| Running | Teal bg, white text, pulsing dot | 20px height |
-| Complete | Gray bg, muted text, static dot | 20px height |
-| Failed | Coral bg, white text, X icon | 20px height |
-| Connected | Green dot (top bar only) | — |
-| Disconnected | Red dot (top bar only) | — |
+| Running | Teal bg, white text, pulsing dot | 20px |
+| Complete | Gray bg, muted text, static dot | 20px |
+| Failed | Coral bg, white text, X icon | 20px |
+| Connected | Green dot (top bar only) | -- |
+| Disconnected | Red dot (top bar only) | -- |
 
-**Stat Card:** Label (11px muted, top) + large value (32px bold, center) + delta (11px colored, bottom). Height 88px, `--color-surface` background, `--radius-md` corners. Value updates in place with no animation.
+**Stat Card:** Label (11px muted, top) + value (32px bold, center) + delta (11px colored, bottom). 88px height, `--color-surface` background, `--radius-md` corners. No animation on value update.
 
-**Event Row:** 48px collapsed, auto-height expanded (min 200px). 4px colored left border. Click toggles expansion with 150ms ease-out height animation. Expanded JSON uses dark background with teal keys, amber strings, mint numbers.
+**Event Row:** 48px collapsed, auto-height expanded (min 200px). 4px colored left border. 150ms ease-out expand animation. Expanded JSON: dark background, teal keys, amber strings, mint numbers.
 
 ### Layout
 
-**Persistent top bar (48px):**
+**Top bar (48px):**
 - Left: CC Observer wordmark + version
-- Center: active session (`session_id`, `cwd`, live elapsed time counter)
-- Right: connection status pill + agent count badge
+- Center: active session (`session_id`, `cwd`, live elapsed)
+- Right: connection status pill + agent count
 
 **Left sidebar:**
 - 200px expanded, 56px collapsed (icon only)
 - 6 items: Spawn Tree, Timeline, Tool Feed, Analytics, Query, Sessions
 - Active: teal left border + background tint
-- Auto-collapses to icon-only below 960px viewport width
-- Badges: agent count on Spawn Tree, unread event count on Tool Feed
+- Auto-collapses below 960px
+- Badges: agent count on Spawn Tree, unread count on Tool Feed
 
 ### Keyboard Shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `Cmd+1` through `Cmd+6` | Switch between views |
-| `Cmd+Enter` | Submit query (Query Console) |
-| `Escape` | Close slide-in panels, collapse expanded rows |
+| `Cmd+1` - `Cmd+6` | Switch views |
+| `Cmd+Enter` | Submit query |
+| `Escape` | Close panels, collapse rows |
 | `Space` | Toggle pause (Tool Feed) |
-| `/` | Focus query input (Query Console) |
+| `/` | Focus query input |
 
 ### Responsive Behavior
 
-| Breakpoint | Sidebar | Layout Changes |
+| Breakpoint | Sidebar | Layout |
 |---|---|---|
-| < 900px | Icon-only (56px) | Stat cards 1 column, Gantt labels truncated |
-| 900–1200px | Expanded (200px) | Stat cards 2x2, standard layout |
-| > 1200px | Expanded (200px) | Stat cards 4 across, Spawn Tree panel wider |
+| < 900px | Icon-only (56px) | Stat cards 1 col, Gantt labels truncated |
+| 900-1200px | Expanded (200px) | Stat cards 2x2, standard |
+| > 1200px | Expanded (200px) | Stat cards 4 across, wider Spawn Tree |
 
 ### SSE Reconnection
 
-On disconnect, the dashboard retries with exponential backoff (1s, 2s, 4s, 8s, max 30s). The top bar status pill updates with the reconnect attempt number. On successful reconnect, the client re-fetches the current session graph to fill any missed events. After 5 failed attempts, a manual "Retry" button appears.
+Exponential backoff on disconnect (1s, 2s, 4s, 8s, max 30s). Top bar status pill shows reconnect attempt number. On reconnect, re-fetch session graph to fill gaps. After 5 failures, manual "Retry" button appears.
 
 ### Loading and Empty States
 
 | State | Display |
 |---|---|
-| Connecting | Centered spinner + "Connecting to observer..." |
+| Connecting | Spinner + "Connecting to observer..." |
 | No active session | "No active session. Run `/oc:start` in Claude Code." |
-| Empty graph | Single Session node, label "Waiting for agents..." |
-| Query loading | Spinner in Ask button, skeleton rows in results |
-| Query empty | "No results" (plain text, not error) |
-| Disconnected | Red status in top bar, banner: "Reconnecting..." with attempt count |
+| Empty graph | Single Session node, "Waiting for agents..." |
+| Query loading | Spinner in Ask button, skeleton rows |
+| Query empty | "No results" |
+| Disconnected | Red status, banner: "Reconnecting..." with attempt count |
