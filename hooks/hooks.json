@@ -1,0 +1,100 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" },
+          { "type": "command", "command": "python ${CLAUDE_PLUGIN_ROOT}/scripts/emit_event.py SessionStart" }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" },
+          { "type": "command", "command": "python ${CLAUDE_PLUGIN_ROOT}/scripts/emit_event.py SessionEnd" }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" },
+          { "type": "command", "command": "python ${CLAUDE_PLUGIN_ROOT}/scripts/emit_event.py UserPromptSubmit" }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" },
+          { "type": "command", "command": "python ${CLAUDE_PLUGIN_ROOT}/scripts/emit_event.py SubagentStart" }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" },
+          { "type": "command", "command": "python ${CLAUDE_PLUGIN_ROOT}/scripts/emit_event.py SubagentStop" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" },
+          { "type": "command", "command": "python ${CLAUDE_PLUGIN_ROOT}/scripts/emit_event.py Stop" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" },
+          { "type": "command", "command": "python ${CLAUDE_PLUGIN_ROOT}/scripts/emit_event.py PreToolUse" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" },
+          { "type": "command", "command": "python ${CLAUDE_PLUGIN_ROOT}/scripts/emit_event.py PostToolUse" }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" },
+          { "type": "command", "command": "python ${CLAUDE_PLUGIN_ROOT}/scripts/emit_event.py PostToolUseFailure" }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://localhost:4001/events" }
+        ]
+      }
+    ]
+  }
+}

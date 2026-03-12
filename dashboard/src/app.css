@@ -1,0 +1,66 @@
+@import 'tailwindcss';
+
+:root {
+	--color-primary: #0A9396;
+	--color-bg: #0D1B2A;
+	--color-surface: #1E293B;
+	--color-surface-2: #2D3E50;
+	--color-success: #94D2BD;
+	--color-warning: #EE9B00;
+	--color-error: #CA6702;
+	--color-text: #F4F8FB;
+	--color-text-muted: #64748B;
+	--color-border: #1E3A4A;
+
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-6: 24px;
+	--radius-sm: 4px;
+	--radius-md: 8px;
+	--radius-lg: 12px;
+}
+
+body {
+	background: var(--color-bg);
+	color: var(--color-text);
+	font-family: 'Inter', system-ui, sans-serif;
+	margin: 0;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--color-surface-2);
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: var(--color-text-muted);
+}
+
+@keyframes pulse-border {
+	0%, 100% { border-color: rgba(10, 147, 150, 0.4); }
+	50% { border-color: rgba(10, 147, 150, 1); }
+}
+
+@keyframes pulse-dot {
+	0%, 100% { opacity: 0.6; }
+	50% { opacity: 1; }
+}
+
+.font-mono {
+	font-family: 'JetBrains Mono', monospace;
+}

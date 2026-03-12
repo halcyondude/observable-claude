@@ -1,0 +1,9 @@
+{
+  "enabledPlugins": {
+    "dt-core@dreamteams": true,
+    "dt-mcp@dreamteams": true,
+    "dt-opensource@dreamteams": true,
+    "dt-data@dreamteams": true,
+    "dt-nerdherd@dreamteams": true
+  }
+}
