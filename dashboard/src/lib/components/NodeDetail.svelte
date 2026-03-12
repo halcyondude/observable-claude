@@ -1,7 +1,18 @@
 <script lang="ts">
 	import type { GraphNode } from '$lib/types/events';
+	import ToolStrip from './ToolStrip.svelte';
+	import ToolFamilyBar from './ToolFamilyBar.svelte';
+	import { getToolColor } from '$lib/stores/tool-families';
 
-	let { node, onclose }: { node: GraphNode | null; onclose: () => void } = $props();
+	let {
+		node,
+		onclose,
+		toolCalls = []
+	}: {
+		node: GraphNode | null;
+		onclose: () => void;
+		toolCalls?: Array<{ name: string; status: string; duration_ms?: number }>;
+	} = $props();
 
 	function relativeTime(ts?: string): string {
 		if (!ts) return '';
@@ -16,6 +27,20 @@
 		complete: { bg: 'var(--color-surface-2)', text: 'var(--color-text-muted)' },
 		failed: { bg: 'var(--color-error)', text: 'white' }
 	};
+
+	// Build tool call list from node.data.tools when no explicit toolCalls provided
+	const effectiveToolCalls = $derived.by(() => {
+		if (toolCalls.length > 0) return toolCalls;
+		if (!node?.data.tools) return [];
+		// Expand the name->count map into individual entries for ToolStrip/ToolFamilyBar
+		const calls: Array<{ name: string; status: string }> = [];
+		for (const [name, count] of Object.entries(node.data.tools)) {
+			for (let i = 0; i < (count as number); i++) {
+				calls.push({ name, status: 'success' });
+			}
+		}
+		return calls;
+	});
 
 	$effect(() => {
 		function handleClose() { onclose(); }
@@ -87,13 +112,64 @@
 					</div>
 				{/if}
 
-				{#if node.data.tools && Object.keys(node.data.tools).length > 0}
+				{#if effectiveToolCalls.length > 0}
+					<div>
+						<span style="color: var(--color-text-muted);">Tool Activity ({node.data.tool_count})</span>
+
+						<!-- Tool Strip — chronological pip sequence -->
+						<div class="mt-1.5">
+							<ToolStrip toolCalls={effectiveToolCalls} />
+						</div>
+
+						<!-- Family breakdown bar -->
+						<div class="mt-1.5">
+							<ToolFamilyBar toolCalls={effectiveToolCalls} height={10} />
+						</div>
+
+						<!-- Tool count list with family color dots -->
+						{#if node.data.tools && Object.keys(node.data.tools).length > 0}
+							<div class="mt-2 space-y-1">
+								{#each Object.entries(node.data.tools) as [name, count]}
+									<div class="flex items-center justify-between">
+										<div class="flex items-center gap-1.5">
+											<span
+												class="inline-block rounded-full flex-shrink-0"
+												style="width: 6px; height: 6px; background: {getToolColor(name)};"
+											></span>
+											<span class="font-mono">{name}</span>
+										</div>
+										<span style="color: var(--color-text-muted);">{count}</span>
+									</div>
+								{/each}
+							</div>
+						{/if}
+
+						<!-- View in Tool Feed link -->
+						<div class="mt-2">
+							<a
+								href="/tools?agent={node.data.id}"
+								class="inline-flex items-center gap-1 text-xs no-underline"
+								style="color: var(--color-primary);"
+							>
+								View in Tool Feed
+								<span style="font-size: 10px;">&#8594;</span>
+							</a>
+						</div>
+					</div>
+				{:else if node.data.tools && Object.keys(node.data.tools).length > 0}
+					<!-- Fallback: plain tool list when no tool call data available -->
 					<div>
 						<span style="color: var(--color-text-muted);">Tools ({node.data.tool_count})</span>
 						<div class="mt-1 space-y-1">
 							{#each Object.entries(node.data.tools) as [name, count]}
-								<div class="flex justify-between">
-									<span class="font-mono">{name}</span>
+								<div class="flex items-center justify-between">
+									<div class="flex items-center gap-1.5">
+										<span
+											class="inline-block rounded-full flex-shrink-0"
+											style="width: 6px; height: 6px; background: {getToolColor(name)};"
+										></span>
+										<span class="font-mono">{name}</span>
+									</div>
 									<span style="color: var(--color-text-muted);">{count}</span>
 								</div>
 							{/each}
