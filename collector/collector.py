@@ -9,8 +9,11 @@ from fastapi import FastAPI, Request, Query
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from anthropic import Anthropic
+
 from .ledger import init_db, write_event, query_events, get_sessions, get_active_sessions
 from .graph import init_graph, materialize_event, get_session_graph, get_session_timeline, reset_graph
+from . import nl_query
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +21,13 @@ _start_time: float = 0.0
 _db = None
 _graph_conn = None
 _graph_db = None
+_anthropic_client = None
 _sse_clients: list[asyncio.Queue] = []
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    global _db, _graph_db, _graph_conn, _start_time
+    global _db, _graph_db, _graph_conn, _anthropic_client, _start_time
     db_path = os.environ.get("DUCKDB_PATH", "./data/duckdb/events.db")
     kuzu_path = os.environ.get("KUZU_PATH", "./data/kuzu")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -31,6 +35,14 @@ async def lifespan(application: FastAPI):
     _db = init_db(db_path)
     _graph_db, _graph_conn = init_graph(kuzu_path)
     _start_time = time.time()
+
+    # Initialize Anthropic client for NL->Cypher (uses ANTHROPIC_API_KEY from env)
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if api_key:
+        _anthropic_client = Anthropic()
+    else:
+        logger.warning("ANTHROPIC_API_KEY not set — /api/ask endpoint will be unavailable")
+
     yield
     if _db:
         _db.close()
@@ -146,6 +158,58 @@ async def session_timeline(session_id: str):
     except Exception:
         logger.exception("Failed to query session timeline for %s", session_id)
         return []
+
+
+@app.post("/api/ask")
+async def ask(request: Request):
+    """Translate a natural language question to Cypher, execute it, and return results."""
+    if not _anthropic_client:
+        return {"error": "ANTHROPIC_API_KEY not configured — NL queries unavailable"}
+
+    body = await request.json()
+    question = body.get("question", "")
+    if not question:
+        return {"error": "Missing 'question' field"}
+
+    try:
+        translated = nl_query.translate(question, _anthropic_client)
+        cypher = translated["cypher"]
+        explanation = translated["explanation"]
+
+        result = _graph_conn.execute(cypher)
+        columns = result.get_column_names()
+        rows = result.get_all()
+        table = [dict(zip(columns, row)) for row in rows]
+
+        return {
+            "cypher": cypher,
+            "explanation": explanation,
+            "result": table,
+        }
+    except json.JSONDecodeError as e:
+        return {"error": "Failed to parse Cypher from AI response", "details": str(e)}
+    except Exception as e:
+        logger.exception("NL query failed for question: %s", question)
+        return {"error": "Query failed", "details": str(e)}
+
+
+@app.post("/api/cypher")
+async def execute_cypher(request: Request):
+    """Execute a raw Cypher query against LadybugDB and return results."""
+    body = await request.json()
+    cypher = body.get("cypher", "")
+    if not cypher:
+        return {"error": "Missing 'cypher' field"}
+
+    try:
+        result = _graph_conn.execute(cypher)
+        columns = result.get_column_names()
+        rows = result.get_all()
+        table = [dict(zip(columns, row)) for row in rows]
+        return {"result": table}
+    except Exception as e:
+        logger.exception("Cypher execution failed: %s", cypher)
+        return {"error": "Query execution failed", "cypher": cypher, "details": str(e)}
 
 
 @app.post("/api/replay")
