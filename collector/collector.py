@@ -29,11 +29,11 @@ _sse_clients: list[asyncio.Queue] = []
 async def lifespan(application: FastAPI):
     global _db, _graph_db, _graph_conn, _anthropic_client, _start_time
     db_path = os.environ.get("DUCKDB_PATH", "./data/duckdb/events.db")
-    kuzu_path = os.environ.get("KUZU_PATH", "./data/kuzu")
+    ladybug_path = os.environ.get("LADYBUG_PATH", "./data/ladybug")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    os.makedirs(kuzu_path, exist_ok=True)
+    os.makedirs(ladybug_path, exist_ok=True)
     _db = init_db(db_path)
-    _graph_db, _graph_conn = init_graph(kuzu_path)
+    _graph_db, _graph_conn = init_graph(ladybug_path)
     _start_time = time.time()
 
     # Initialize Anthropic client for NL->Cypher (uses ANTHROPIC_API_KEY from env)

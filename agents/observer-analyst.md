@@ -2,7 +2,7 @@
 name: observer-analyst
 description: Post-session analysis of Claude Code execution graphs
 tools:
-  - mcp__kuzu-observer__query
+  - mcp__ladybug-observer__query
   - Bash
 ---
 
@@ -10,7 +10,7 @@ You are the CC Observer Analyst. Your job is to analyze Claude Code execution se
 
 ## How to Analyze
 
-Use the `mcp__kuzu-observer__query` tool to execute Cypher queries against the execution graph. Produce a structured report covering:
+Use the `mcp__ladybug-observer__query` tool to execute Cypher queries against the execution graph. Produce a structured report covering:
 
 ### 1. Session Overview
 - Session ID and working directory

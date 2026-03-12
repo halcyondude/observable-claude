@@ -7,141 +7,106 @@ description: System design, event lifecycle, storage strategy, Docker topology, 
 
 ## System Overview
 
-CC Observer is a local observability stack for Claude Code. It captures lifecycle events via hooks, stores them in a dual-database architecture (DuckDB for analytics, LadybugDB for graph queries), and serves a real-time dashboard.
+Local observability stack for Claude Code. Hooks capture lifecycle events, dual-database architecture stores them (DuckDB for analytics, LadybugDB for graph queries), real-time dashboard surfaces everything.
 
 ```mermaid
-%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#0A9396', 'primaryBorderColor': '#0A9396', 'primaryTextColor': '#F4F8FB', 'lineColor': '#64748B', 'secondaryColor': '#1E293B', 'tertiaryColor': '#0D1B2A'}}}%%
 flowchart TB
-    subgraph HOST ["Host Machine"]
-        direction TB
-        CC["Claude Code\nAgent Runtime"]:::primary
-        HOOKS["hooks.json\n12 event types"]:::config
-
+    subgraph HOST ["Host"]
+        CC["Claude Code"]
+        HOOKS["hooks.json<br/>12 event types"]
         CC -->|fires| HOOKS
     end
 
-    subgraph DOCKER ["Docker Compose Stack"]
-        direction TB
-        subgraph COLLECTOR ["Collector Service · FastAPI · Python 3.12"]
-            direction LR
-            INGEST["/events\nPOST · :4001\nHook Ingestion"]:::endpoint
-            SSE_EP["/stream\nGET · :4002\nSSE Broadcast"]:::endpoint
-            REST["/api/*\nGET/POST · :4002\nREST API"]:::endpoint
-            NL["NL→Cypher\nAnthropic API"]:::module
-            GRAPH_MOD["graph.py\nMaterialization"]:::module
-            LEDGER_MOD["ledger.py\nEvent Writer"]:::module
+    subgraph COLLECTOR ["Collector (FastAPI)"]
+        INGEST["POST :4001<br/>/events"]
+        SSE_EP["GET :4002<br/>/stream"]
+        REST["GET/POST :4002<br/>/api/*"]
+        NL["NL-to-Cypher"]
+        GRAPH_MOD["graph.py"]
+        LEDGER_MOD["ledger.py"]
 
-            INGEST --> LEDGER_MOD
-            INGEST --> GRAPH_MOD
-            INGEST --> SSE_EP
-            REST --> NL
-        end
+        INGEST --> LEDGER_MOD
+        INGEST --> GRAPH_MOD
+        INGEST --> SSE_EP
+        REST --> NL
+    end
 
-        subgraph STORAGE ["Persistent Storage · Docker Volumes"]
-            direction LR
-            DUCK[("DuckDB\n./data/duckdb/events.db\nImmutable Event Ledger")]:::storage
-            KUZU[("LadybugDB\n./data/kuzu/\nExecution Graph")]:::storage
-        end
+    subgraph STORAGE ["Storage (Docker Volumes)"]
+        DUCK[("DuckDB<br/>Event Ledger")]
+        LADY[("LadybugDB<br/>Exec Graph")]
+    end
 
-        subgraph DASH_SVC ["Dashboard Service · SvelteKit + nginx"]
-            direction LR
-            NGINX["nginx\nReverse Proxy\n:3000 → :80"]:::endpoint
-            SVELTE["SvelteKit\nCytoscape.js\n6 Views"]:::ui
-            NGINX --> SVELTE
-        end
-
-        LEDGER_MOD --> DUCK
-        GRAPH_MOD --> KUZU
-        REST -.->|reads| DUCK
-        REST -.->|reads| KUZU
-        SSE_EP -->|push| NGINX
-        REST -->|fetch| NGINX
+    subgraph DASH ["Dashboard (SvelteKit)"]
+        NGINX["nginx :4242"]
+        SVELTE["Cytoscape.js"]
+        NGINX --> SVELTE
     end
 
     subgraph MCP ["MCP Server"]
-        KUZU_MCP["kuzu-mcp-server\nDirect Cypher Access"]:::module
+        LADY_MCP["ladybug-observer<br/>Cypher access"]
     end
 
-    HOOKS -->|"HTTP POST\nlocalhost:4001"| INGEST
-    HOOKS -.->|"command fallback\nemit_event.py"| INGEST
-    KUZU -.-> KUZU_MCP
-    KUZU_MCP -.->|"mcp__kuzu-observer__query"| CC
-
-    classDef primary fill:#0A9396,stroke:#0A9396,color:#F4F8FB,stroke-width:2px
-    classDef endpoint fill:#1E293B,stroke:#0A9396,color:#F4F8FB
-    classDef module fill:#2D3E50,stroke:#64748B,color:#F4F8FB
-    classDef storage fill:#1E293B,stroke:#94D2BD,color:#F4F8FB,stroke-width:2px
-    classDef config fill:#1E293B,stroke:#EE9B00,color:#F4F8FB
-    classDef ui fill:#1E293B,stroke:#EE9B00,color:#F4F8FB
-
-    style HOST fill:#0D1B2A,stroke:#1E3A4A,color:#F4F8FB
-    style DOCKER fill:#0D1B2A,stroke:#1E3A4A,color:#F4F8FB
-    style COLLECTOR fill:#0D1B2A,stroke:#0A9396,color:#F4F8FB
-    style STORAGE fill:#0D1B2A,stroke:#94D2BD,color:#F4F8FB
-    style DASH_SVC fill:#0D1B2A,stroke:#EE9B00,color:#F4F8FB
-    style MCP fill:#0D1B2A,stroke:#64748B,color:#F4F8FB
+    HOOKS -->|"HTTP POST"| INGEST
+    HOOKS -.->|"fallback: emit_event.py"| INGEST
+    LEDGER_MOD --> DUCK
+    GRAPH_MOD --> LADY
+    REST -.->|reads| DUCK
+    REST -.->|reads| LADY
+    SSE_EP -->|push| NGINX
+    REST -->|fetch| NGINX
+    LADY -.-> LADY_MCP
+    LADY_MCP -.->|MCP tool| CC
 ```
 
 ## Event Lifecycle
 
-Every event goes through a deterministic pipeline: hook capture, HTTP delivery, DuckDB write (always), graph materialization (best-effort), SSE broadcast.
+Deterministic pipeline: hook capture, HTTP delivery, DuckDB write (always), graph materialization (best-effort), SSE broadcast.
 
 ```mermaid
-%%{init: {'theme': 'dark'}}%%
-flowchart LR
-    subgraph CAPTURE ["1 · Capture"]
-        HOOK_FIRE["Claude Code\nfires hook"]:::step
-        HTTP_POST["HTTP POST\nlocalhost:4001/events"]:::step
-        CMD_FALL["Command Fallback\nemit_event.py"]:::fallback
+flowchart TB
+    subgraph CAPTURE ["1. Capture"]
+        HOOK["Hook fires"]
+        HTTP["HTTP POST<br/>:4001/events"]
+        CMD["Fallback<br/>emit_event.py"]
 
-        HOOK_FIRE --> HTTP_POST
-        HOOK_FIRE -.->|if HTTP fails| CMD_FALL
-        CMD_FALL -.->|retry POST or\nwrite JSONL| HTTP_POST
+        HOOK --> HTTP
+        HOOK -.->|if HTTP fails| CMD
+        CMD -.->|retry or JSONL| HTTP
     end
 
-    subgraph INGEST ["2 · Ingest"]
-        PARSE["Parse Payload\nextract fields"]:::step
-        WRITE_DUCK["write_event()\nDuckDB INSERT"]:::step
-        GEN_ID["Generate\nevent_id UUID"]:::step
+    subgraph INGEST ["2. Ingest"]
+        PARSE["Parse payload"]
+        GEN_ID["Generate UUID"]
+        WRITE_DUCK["DuckDB INSERT"]
 
         PARSE --> GEN_ID --> WRITE_DUCK
     end
 
-    subgraph MATERIALIZE ["3 · Materialize"]
-        ROUTE["Route by\nevent_type"]:::step
-        CYPHER["Execute Cypher\nmutation"]:::step
-        SKIP["Skip\nDuckDB-only events"]:::fallback
+    subgraph MATERIALIZE ["3. Materialize"]
+        ROUTE["Route by type"]
+        CYPHER["Cypher mutation"]
+        SKIP["Skip (DuckDB-only)"]
 
         ROUTE -->|graph event| CYPHER
-        ROUTE -.->|Notification\nPermissionRequest\nPreCompact| SKIP
+        ROUTE -.->|no-op events| SKIP
     end
 
-    subgraph BROADCAST ["4 · Broadcast"]
-        QUEUE["Push to all\nSSE client queues"]:::step
-        SSE_OUT["SSE frame\nevent: type\ndata: JSON"]:::step
-
+    subgraph BROADCAST ["4. Broadcast"]
+        QUEUE["SSE queues"]
+        SSE_OUT["SSE frame"]
         QUEUE --> SSE_OUT
     end
 
-    HTTP_POST --> PARSE
+    HTTP --> PARSE
     WRITE_DUCK --> ROUTE
     WRITE_DUCK --> QUEUE
-
-    classDef step fill:#1E293B,stroke:#0A9396,color:#F4F8FB
-    classDef fallback fill:#1E293B,stroke:#CA6702,color:#F4F8FB,stroke-dasharray: 5 5
-
-    style CAPTURE fill:#0D1B2A,stroke:#64748B,color:#F4F8FB
-    style INGEST fill:#0D1B2A,stroke:#64748B,color:#F4F8FB
-    style MATERIALIZE fill:#0D1B2A,stroke:#64748B,color:#F4F8FB
-    style BROADCAST fill:#0D1B2A,stroke:#64748B,color:#F4F8FB
 ```
 
 ## Complete Event Journey
 
-This sequence diagram traces a single session from start to completion, showing how each event flows through the system.
+Single session from start to completion — each event flowing through the system.
 
 ```mermaid
-%%{init: {'theme': 'dark', 'sequence': {'mirrorActors': false}}}%%
 sequenceDiagram
     participant CC as Claude Code
     participant COL as Collector
@@ -152,65 +117,57 @@ sequenceDiagram
 
     rect rgba(10, 147, 150, 0.1)
         Note over CC,DASH: Session Lifecycle
-        CC->>COL: POST /events {SessionStart}
-        COL->>DUCK: INSERT event row
-        COL->>LADY: MERGE Session node
-        COL->>SSE: broadcast SessionStart
-        SSE->>DASH: render session in top bar
+        CC->>COL: POST {SessionStart}
+        COL->>DUCK: INSERT event
+        COL->>LADY: MERGE Session
+        COL->>SSE: broadcast
+        SSE->>DASH: render session
     end
 
     rect rgba(10, 147, 150, 0.1)
         Note over CC,DASH: Agent Spawning
-        CC->>COL: POST /events {SubagentStart, agent_type: "planner"}
-        COL->>DUCK: INSERT event row
-        COL->>LADY: MERGE Agent node + CREATE SPAWNED edge
-        COL->>SSE: broadcast SubagentStart
-        SSE->>DASH: animate new node into spawn tree
+        CC->>COL: POST {SubagentStart}
+        COL->>DUCK: INSERT event
+        COL->>LADY: MERGE Agent + SPAWNED edge
+        COL->>SSE: broadcast
+        SSE->>DASH: animate spawn tree
     end
 
     rect rgba(238, 155, 0, 0.1)
-        Note over CC,DASH: Tool Invocation (success)
-        CC->>COL: POST /events {PreToolUse, tool: "Read"}
-        COL->>DUCK: INSERT event row
-        COL->>LADY: MERGE Tool node + CREATE INVOKED edge (pending)
-        COL->>SSE: broadcast PreToolUse
-        SSE->>DASH: show PRE row in Tool Feed
+        Note over CC,DASH: Tool Use (success)
+        CC->>COL: POST {PreToolUse, Read}
+        COL->>DUCK: INSERT event
+        COL->>LADY: MERGE Tool + INVOKED (pending)
+        SSE->>DASH: show PRE row
 
-        CC->>COL: POST /events {PostToolUse, tool: "Read", duration: 45ms}
-        COL->>DUCK: INSERT event row
-        COL->>LADY: SET INVOKED.status=success, duration_ms=45
-        COL->>SSE: broadcast PostToolUse
-        SSE->>DASH: show POST row + duration in Tool Feed
+        CC->>COL: POST {PostToolUse, 45ms}
+        COL->>DUCK: INSERT event
+        COL->>LADY: SET status=success
+        SSE->>DASH: show POST + duration
     end
 
     rect rgba(202, 103, 2, 0.1)
-        Note over CC,DASH: Tool Invocation (failure)
-        CC->>COL: POST /events {PreToolUse, tool: "Write"}
-        COL->>DUCK: INSERT event row
-        COL->>LADY: CREATE INVOKED edge (pending)
-        CC->>COL: POST /events {PostToolUseFailure, tool: "Write"}
-        COL->>DUCK: INSERT event row
-        COL->>LADY: SET INVOKED.status=failed
-        COL->>SSE: broadcast PostToolUseFailure
-        SSE->>DASH: flash coral in spawn tree + FAIL row in feed
+        Note over CC,DASH: Tool Use (failure)
+        CC->>COL: POST {PreToolUse, Write}
+        COL->>LADY: INVOKED (pending)
+        CC->>COL: POST {PostToolUseFailure}
+        COL->>LADY: SET status=failed
+        SSE->>DASH: flash failure
     end
 
     rect rgba(10, 147, 150, 0.1)
         Note over CC,DASH: Session Complete
-        CC->>COL: POST /events {SubagentStop}
-        COL->>DUCK: INSERT event row
-        COL->>LADY: SET Agent.end_ts, status=complete
-        CC->>COL: POST /events {SessionEnd}
-        COL->>DUCK: INSERT event row
+        CC->>COL: POST {SubagentStop}
+        COL->>LADY: SET Agent.end_ts
+        CC->>COL: POST {SessionEnd}
         COL->>LADY: SET Session.end_ts
-        COL->>SSE: broadcast SessionEnd
-        SSE->>DASH: fade agents to gray, session archived
+        SSE->>DASH: archive session
     end
 ```
 
 ## Storage Strategy
 
-CC Observer uses two databases because they solve fundamentally different problems.
+Two databases because they solve fundamentally different problems.
 
 | Dimension | DuckDB | LadybugDB |
 |---|---|---|
@@ -219,70 +176,89 @@ CC Observer uses two databases because they solve fundamentally different proble
 | **Mutability** | Append-only (immutable ledger) | Live mutations per event |
 | **Recovery** | Source of truth | Rebuilt from DuckDB via `replay.py` |
 | **Query language** | SQL | Cypher |
-| **Best for** | "What happened at 14:03?" "p95 latency?" | "Who spawned whom?" "Full spawn tree?" |
+| **Best for** | "What happened at 14:03?" | "Who spawned whom?" |
 | **Size** | Grows with event count | Grows with session topology |
 
-**Key design decision:** DuckDB is the immutable source of truth. LadybugDB is a materialized view of the graph structure. If LadybugDB gets corrupted, `scripts/replay.py` rebuilds it by replaying all events from DuckDB in order.
+DuckDB is the immutable source of truth. LadybugDB is a materialized view. If LadybugDB gets corrupted, `scripts/replay.py` rebuilds it by replaying all events from DuckDB in order.
 
 ## Hook Delivery
 
-Events reach the collector through dual delivery: HTTP primary with a command fallback for resilience.
+Dual delivery: HTTP primary, command fallback for resilience.
 
 ```mermaid
-%%{init: {'theme': 'dark'}}%%
-flowchart TD
-    EVENT["Claude Code\nfires event"]:::primary
+flowchart TB
+    EVENT["Hook fires"]
 
-    EVENT --> HTTP{"HTTP POST\nlocalhost:4001/events"}
+    EVENT --> HTTP{"HTTP POST<br/>:4001/events"}
 
-    HTTP -->|"200 OK"| DONE["Event ingested"]:::success
-    HTTP -->|"Connection refused\nor timeout"| CMD["Command fallback\nemit_event.py"]:::fallback
+    HTTP -->|200 OK| DONE["Ingested"]
+    HTTP -->|fail| CMD["emit_event.py"]
 
-    CMD --> JSONL["Write to\ndata/fallback.jsonl"]:::step
-    CMD --> RETRY{"Retry HTTP POST\n1s timeout"}
+    CMD --> JSONL["Write fallback.jsonl"]
+    CMD --> RETRY{"Retry POST<br/>1s timeout"}
 
-    RETRY -->|"200 OK"| DONE
-    RETRY -->|"Still down"| SAVED["Event saved in JSONL\nfor later replay"]:::warn
+    RETRY -->|200 OK| DONE
+    RETRY -->|still down| SAVED["Saved in JSONL<br/>for later replay"]
 
-    NOTE1["PermissionRequest\nNotification\nPreCompact"]:::note --> HTTP_ONLY["HTTP only\nno command fallback"]:::step
+    NOTE["PermissionRequest<br/>Notification<br/>PreCompact"] --> HTTP_ONLY["HTTP only<br/>no fallback"]
     HTTP_ONLY --> HTTP
-
-    NOTE2["These events are http-only because\nspawning a subprocess during\npermission dialogs would block\nClaude Code visibly"]:::note
-
-    classDef primary fill:#0A9396,stroke:#0A9396,color:#F4F8FB,stroke-width:2px
-    classDef success fill:#1E293B,stroke:#94D2BD,color:#F4F8FB
-    classDef step fill:#1E293B,stroke:#0A9396,color:#F4F8FB
-    classDef fallback fill:#1E293B,stroke:#EE9B00,color:#F4F8FB
-    classDef warn fill:#1E293B,stroke:#CA6702,color:#F4F8FB
-    classDef note fill:#2D3E50,stroke:#64748B,color:#64748B,stroke-dasharray: 5 5
 ```
+
+Three events skip the command fallback — spawning a subprocess during permission dialogs would block Claude Code.
 
 ## Docker Compose Topology
 
-The stack runs two services with shared volumes for persistent storage.
+Two services, shared volumes.
+
+```mermaid
+flowchart TB
+    subgraph COMPOSE ["docker compose"]
+        subgraph COL ["collector · Python 3.12"]
+            FA["FastAPI :8000"]
+        end
+
+        subgraph DASH ["dashboard · SvelteKit"]
+            NG["nginx :80"]
+        end
+
+        subgraph VOLS ["volumes"]
+            D[("duckdb/")]
+            L[("ladybug/")]
+        end
+
+        FA --> D
+        FA --> L
+        NG -->|"/api/*, /stream"| FA
+    end
+
+    H4001["Host :4001<br/>hooks"] --> FA
+    H4002["Host :4002<br/>API + SSE"] --> FA
+    H4242["Host :4242<br/>dashboard"] --> NG
+    DASH -->|depends_on healthy| COL
+```
 
 | Service | Image | Ports | Purpose |
 |---|---|---|---|
 | `collector` | `./collector` (Python 3.12) | `4001:8000`, `4002:8000` | Event ingestion, graph materialization, REST + SSE API |
-| `dashboard` | `./dashboard` (SvelteKit + nginx) | `3000:80` | Static SvelteKit build served by nginx, proxies API to collector |
+| `dashboard` | `./dashboard` (SvelteKit + nginx) | `4242:80` | Static SvelteKit build served by nginx, proxies API to collector |
 
-Both ports 4001 and 4002 map to the same internal port 8000 in the collector container. This is a single-process FastAPI app — the port split is for clarity (4001 = hooks, 4002 = dashboard API).
+Ports 4001 and 4002 both map to internal port 8000. Single-process FastAPI app — the port split is for clarity (4001 = hooks, 4002 = dashboard API).
 
-**Volume mounts:**
+**Volumes:**
 
 | Host Path | Container Path | Contents |
 |---|---|---|
-| `./data/duckdb/` | `/data/duckdb/` | `events.db` — DuckDB file |
-| `./data/kuzu/` | `/data/kuzu/` | LadybugDB data directory |
+| `./data/duckdb/` | `/data/duckdb/` | `events.db` |
+| `./data/ladybug/` | `/data/ladybug/` | LadybugDB data directory |
 
-Data persists across container restarts and survives `docker compose down`. Only `docker compose down -v` removes volumes.
+Data persists across container restarts and `docker compose down`. Only `docker compose down -v` removes volumes.
 
 ## Port Map
 
 | Port | Service | Protocol | Purpose |
 |---|---|---|---|
-| `3000` | Dashboard | HTTP | SvelteKit UI |
-| `4001` | Collector | HTTP | Hook event ingestion (`POST /events`) |
-| `4002` | Collector | HTTP + SSE | REST API (`/api/*`) and SSE stream (`/stream`) |
+| `4242` | Dashboard | HTTP | SvelteKit UI |
+| `4001` | Collector | HTTP | Hook ingestion (`POST /events`) |
+| `4002` | Collector | HTTP + SSE | REST API (`/api/*`) + SSE (`/stream`) |
 
-All ports are localhost-only. No auth required — this is a single-user local tool.
+All localhost-only. No auth — single-user local tool.

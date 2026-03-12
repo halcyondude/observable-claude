@@ -101,7 +101,7 @@ CMD ["uvicorn", "collector:app", "--host", "0.0.0.0", "--port", "8000"]
 
 **Configuration:**
 - `collector` service: build `./collector`, ports `4001:8000` and `4002:8000`, volumes for `./data/duckdb:/data/duckdb` and `./data/kuzu:/data/kuzu`, env vars `DUCKDB_PATH`, `KUZU_PATH`, `ANTHROPIC_API_KEY` (from host env), healthcheck on `/health`, restart `unless-stopped`
-- `dashboard` service: stubbed out (build `./dashboard`, port `3000:80`, depends_on collector healthy) — commented out until Phase 5
+- `dashboard` service: stubbed out (build `./dashboard`, port `4242:80`, depends_on collector healthy) — commented out until Phase 5
 
 **Acceptance criteria:**
 - `docker compose up -d` starts the collector
@@ -487,7 +487,7 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 **Acceptance criteria:**
 - `docker compose up -d` starts both collector and dashboard
-- `http://localhost:3000` serves the SvelteKit app
+- `http://localhost:4242` serves the SvelteKit app
 - `/api/health` proxied through nginx returns collector health
 
 ---
@@ -717,7 +717,7 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 **Acceptance criteria:**
 - `docker compose up -d` starts both services
-- Dashboard loads at `localhost:3000`
+- Dashboard loads at `localhost:4242`
 - All 6 views populated with data from a live Claude Code session
 - SSE reconnection works after collector restart
 

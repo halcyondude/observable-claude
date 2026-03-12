@@ -1,5 +1,5 @@
 ---
-name: observer:stop
+name: oc:stop
 description: Stop the CC Observer Docker stack
 ---
 

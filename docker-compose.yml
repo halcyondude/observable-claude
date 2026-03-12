@@ -6,10 +6,10 @@ services:
       - "4002:8000"
     volumes:
       - ./data/duckdb:/data/duckdb
-      - ./data/kuzu:/data/kuzu
+      - ./data/ladybug:/data/ladybug
     environment:
       DUCKDB_PATH: /data/duckdb/events.db
-      KUZU_PATH: /data/kuzu
+      LADYBUG_PATH: /data/ladybug
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     restart: unless-stopped
     healthcheck:
@@ -21,7 +21,7 @@ services:
   dashboard:
     build: ./dashboard
     ports:
-      - "3000:80"
+      - "4242:80"
     depends_on:
       collector:
         condition: service_healthy
