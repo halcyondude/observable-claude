@@ -5,18 +5,26 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Query
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, Query, UploadFile, File
+from fastapi.responses import JSONResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
 from anthropic import Anthropic
 
 from .ledger import (
-    init_db, write_event, query_events, get_sessions, get_active_sessions,
+    init_db, write_event, query_events,
+    get_sessions, get_active_sessions, get_grouped_sessions,
+    get_session_events, get_session_event_count,
+    get_activity_histogram, get_session_summary,
     write_message, get_next_sequence, get_agent_messages, get_session_messages,
-    get_agent_tool_summary, search_messages,
+    get_session_message_count, get_agent_tool_summary, search_messages,
+    save_session, unsave_session, get_saved_sessions, update_saved_session,
+    export_session_gzip, import_session, parse_ccobs,
 )
-from .graph import init_graph, materialize_event, materialize_message, get_session_graph, get_session_timeline, reset_graph
+from .graph import (
+    init_graph, materialize_event, materialize_message,
+    get_session_graph, get_session_timeline, reset_graph,
+)
 from . import nl_query
 
 logger = logging.getLogger(__name__)
@@ -28,6 +36,9 @@ _graph_db = None
 _anthropic_client = None
 _sse_clients: list[asyncio.Queue] = []
 
+# Replay state: keyed by session_id
+_replay_states: dict[str, dict] = {}
+
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
@@ -35,12 +46,11 @@ async def lifespan(application: FastAPI):
     db_path = os.environ.get("DUCKDB_PATH", "./data/duckdb/events.db")
     ladybug_path = os.environ.get("LADYBUG_PATH", "./data/ladybug")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    os.makedirs(ladybug_path, exist_ok=True)
+    os.makedirs(os.path.dirname(ladybug_path) or ".", exist_ok=True)
     _db = init_db(db_path)
     _graph_db, _graph_conn = init_graph(ladybug_path)
     _start_time = time.time()
 
-    # Initialize Anthropic client for NL->Cypher (uses ANTHROPIC_API_KEY from env)
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if api_key:
         _anthropic_client = Anthropic()
@@ -53,6 +63,9 @@ async def lifespan(application: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+# --- Helpers ---
 
 
 def _truncate(text: str, max_len: int = 500) -> str:
@@ -80,6 +93,9 @@ def _broadcast_sse(event_type: str, data: str) -> None:
             dead.append(q)
     for q in dead:
         _sse_clients.remove(q)
+
+
+# --- Message extraction ---
 
 
 def _write_and_materialize_message(
@@ -145,7 +161,6 @@ def _handle_subagent_stop_message(event_id: str, payload: dict) -> None:
     if not agent_id or not session_id:
         return
 
-    # Check for a result/output field (future hook enhancement)
     result_text = _extract_field(payload, "event.result", "result")
     output_text = _extract_field(payload, "event.output", "output")
     response_text = result_text or output_text
@@ -162,7 +177,6 @@ def _handle_subagent_stop_message(event_id: str, payload: dict) -> None:
             synthetic=False,
         )
     else:
-        # Synthetic summary from tool activity
         summary = get_agent_tool_summary(_db, agent_id)
         tool_list = ", ".join(summary["tools"][:5]) if summary["tools"] else "none"
         duration_ms = _extract_field(payload, "event.duration_ms", "duration_ms")
@@ -251,7 +265,6 @@ def _handle_post_tool_message(event_id: str, payload: dict) -> None:
     )
 
 
-# Message handlers keyed by event type
 _MESSAGE_HANDLERS = {
     "SubagentStop": _handle_subagent_stop_message,
     "PreToolUse": _handle_pre_tool_message,
@@ -260,19 +273,20 @@ _MESSAGE_HANDLERS = {
 }
 
 
+# --- Core endpoints ---
+
+
 @app.post("/events")
 async def ingest_event(request: Request):
     payload = await request.json()
     event_id = write_event(_db, payload)
 
-    # Graph materialization — best-effort, never blocks event ingestion
     if _graph_conn:
         try:
             materialize_event(_graph_conn, payload)
         except Exception:
             logger.exception("Graph materialization failed for event %s", event_id)
 
-    # Message extraction — best-effort
     event_type = payload.get("event", {}).get("event_type", payload.get("event_type", "unknown"))
     msg_handler = _MESSAGE_HANDLERS.get(event_type)
     if msg_handler:
@@ -316,6 +330,9 @@ async def stream():
     return EventSourceResponse(event_generator())
 
 
+# --- Session endpoints ---
+
+
 @app.get("/api/sessions")
 async def list_sessions():
     return get_sessions(_db)
@@ -324,6 +341,146 @@ async def list_sessions():
 @app.get("/api/sessions/active")
 async def list_active_sessions():
     return get_active_sessions(_db)
+
+
+@app.get("/api/sessions/saved")
+async def list_saved_sessions():
+    return get_saved_sessions(_db)
+
+
+@app.get("/api/sessions/grouped")
+async def grouped_sessions(
+    since: str | None = Query(None, description="ISO timestamp — only include sessions with events after this time"),
+    limit: int | None = Query(None, ge=1, le=100, description="Max sessions per workspace"),
+):
+    groups = get_grouped_sessions(_db, since=since, limit=limit)
+
+    # Enrich with branch info from LadybugDB if available
+    if _graph_conn:
+        try:
+            result = _graph_conn.execute(
+                "MATCH (s:Session) WHERE s.branch IS NOT NULL AND s.branch <> '' "
+                "RETURN s.session_id, s.branch"
+            )
+            branch_map = {row[0]: row[1] for row in result.get_all()}
+            for group in groups:
+                for session in group["sessions"]:
+                    branch = branch_map.get(session["session_id"], "")
+                    if branch:
+                        session["branch"] = branch
+        except Exception:
+            logger.exception("Failed to enrich sessions with branch data")
+
+    return groups
+
+
+@app.get("/api/sessions/activity")
+async def session_activity(
+    bucket: int = Query(60, ge=1, le=3600),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
+):
+    """Time-bucketed event counts grouped by cwd for the Galaxy View time brush."""
+    buckets = get_activity_histogram(_db, bucket_seconds=bucket, since=since, until=until)
+    return {"bucket_seconds": bucket, "buckets": buckets}
+
+
+@app.get("/api/sessions/summary")
+async def session_summary():
+    """Aggregate session counts for the dashboard header."""
+    return get_session_summary(_db)
+
+
+# --- Save/unsave endpoints ---
+
+
+@app.post("/api/sessions/{session_id}/save")
+async def save_session_endpoint(session_id: str, request: Request):
+    body = await request.json()
+    name = body.get("name", session_id)
+    notes = body.get("notes")
+    tags = body.get("tags")
+    try:
+        result = save_session(_db, session_id, name, notes, tags)
+        return result
+    except Exception as e:
+        logger.exception("Failed to save session %s", session_id)
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.delete("/api/sessions/{session_id}/save")
+async def unsave_session_endpoint(session_id: str):
+    unsave_session(_db, session_id)
+    return {"status": "ok", "session_id": session_id}
+
+
+@app.put("/api/sessions/{session_id}/save")
+async def update_saved_session_endpoint(session_id: str, request: Request):
+    body = await request.json()
+    name = body.get("name")
+    notes = body.get("notes")
+    tags = body.get("tags")
+    result = update_saved_session(_db, session_id, name, notes, tags)
+    if result is None:
+        return JSONResponse(status_code=404, content={"error": "Session not saved"})
+    return result
+
+
+# --- Export/Import endpoints ---
+
+
+@app.get("/api/sessions/{session_id}/export")
+async def export_session_endpoint(session_id: str):
+    """Download a session as a .ccobs file (gzipped JSON)."""
+    if not _db:
+        return JSONResponse({"error": "Database not initialized"}, status_code=503)
+
+    graph_data = {"nodes": [], "edges": []}
+    timeline_data = []
+    if _graph_conn:
+        try:
+            graph_data = get_session_graph(_graph_conn, session_id)
+        except Exception:
+            logger.exception("Failed to get graph for export of %s", session_id)
+        try:
+            timeline_data = get_session_timeline(_graph_conn, session_id)
+        except Exception:
+            logger.exception("Failed to get timeline for export of %s", session_id)
+
+    try:
+        gz_bytes = export_session_gzip(_db, session_id, graph_data, timeline_data)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+    filename = f"{session_id[:12]}.ccobs"
+    return Response(
+        content=gz_bytes,
+        media_type="application/gzip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/sessions/import")
+async def import_session_endpoint(file: UploadFile = File(...)):
+    """Import a .ccobs file."""
+    if not _db:
+        return JSONResponse({"error": "Database not initialized"}, status_code=503)
+
+    raw = await file.read()
+    try:
+        data = parse_ccobs(raw)
+    except (json.JSONDecodeError, ValueError) as e:
+        return JSONResponse({"error": f"Invalid .ccobs file: {e}"}, status_code=400)
+
+    try:
+        result = import_session(_db, data)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    return result
+
+
+# --- Event endpoints ---
 
 
 @app.get("/api/events")
@@ -347,6 +504,9 @@ async def list_events(
     return query_events(_db, filters=filters, limit=limit, offset=offset)
 
 
+# --- Message endpoints ---
+
+
 @app.get("/api/messages/search")
 async def message_search(
     q: str = Query(..., min_length=1),
@@ -359,13 +519,8 @@ async def message_search(
     """Full-text search across message content."""
     try:
         return search_messages(
-            _db,
-            q=q,
-            session_id=session_id,
-            agent_id=agent_id,
-            role=role,
-            limit=limit,
-            offset=offset,
+            _db, q=q, session_id=session_id, agent_id=agent_id,
+            role=role, limit=limit, offset=offset,
         )
     except Exception as e:
         logger.exception("Message search failed for q=%s", q)
@@ -390,6 +545,9 @@ async def session_messages(
     return get_session_messages(_db, session_id, limit=limit, offset=offset)
 
 
+# --- Graph endpoints ---
+
+
 @app.get("/api/sessions/{session_id}/graph")
 async def session_graph(session_id: str):
     if not _graph_conn:
@@ -410,6 +568,9 @@ async def session_timeline(session_id: str):
     except Exception:
         logger.exception("Failed to query session timeline for %s", session_id)
         return []
+
+
+# --- NL-to-Cypher endpoints ---
 
 
 @app.post("/api/ask")
@@ -464,6 +625,9 @@ async def execute_cypher(request: Request):
         return {"error": "Query execution failed", "cypher": cypher, "details": str(e)}
 
 
+# --- Replay endpoints ---
+
+
 @app.post("/api/replay")
 async def replay():
     """Rebuild the LadybugDB graph from all DuckDB events."""
@@ -496,3 +660,206 @@ async def replay():
     except Exception:
         logger.exception("Replay failed")
         return {"status": "error", "message": "Replay failed"}
+
+
+@app.get("/api/sessions/{session_id}/replay/stream")
+async def replay_stream(session_id: str, speed: float = Query(1, ge=0, le=100)):
+    """SSE endpoint that replays a session's events with timing proportional to original gaps.
+
+    Touchpoint 4: includes message events interleaved with lifecycle events.
+    """
+    if not _db:
+        return JSONResponse({"error": "Database not initialized"}, status_code=500)
+
+    events_list = get_session_events(_db, session_id)
+    if not events_list:
+        return JSONResponse({"error": "No events found for session"}, status_code=404)
+
+    # Fetch session messages for interleaving (touchpoint 4)
+    messages_list = get_session_messages(_db, session_id, limit=10000)
+
+    total = len(events_list)
+
+    pause_event = asyncio.Event()
+    pause_event.set()
+    state = {
+        "speed": speed,
+        "paused": False,
+        "position": 0,
+        "total": total,
+        "pause_event": pause_event,
+        "cancelled": False,
+    }
+    _replay_states[session_id] = state
+
+    async def replay_generator():
+        try:
+            yield {
+                "event": "replay_start",
+                "data": json.dumps({
+                    "session_id": session_id,
+                    "total_events": total,
+                    "speed": state["speed"],
+                }),
+            }
+
+            # Build a merged timeline of events + messages sorted by timestamp
+            msg_idx = 0
+            prev_ts = None
+            for i, row in enumerate(events_list):
+                if state["cancelled"]:
+                    break
+
+                await state["pause_event"].wait()
+                if state["cancelled"]:
+                    break
+
+                if i < state["position"]:
+                    continue
+                state["position"] = i
+
+                received_at = row.get("received_at")
+                if prev_ts is not None and received_at is not None and state["speed"] > 0:
+                    try:
+                        from datetime import datetime
+                        if isinstance(received_at, str):
+                            curr = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+                        else:
+                            curr = received_at
+                        if isinstance(prev_ts, str):
+                            prev = datetime.fromisoformat(prev_ts.replace("Z", "+00:00"))
+                        else:
+                            prev = prev_ts
+
+                        gap_seconds = (curr - prev).total_seconds()
+                        if gap_seconds > 0:
+                            delay = gap_seconds / state["speed"]
+                            delay = min(delay, 5.0)
+                            await asyncio.sleep(delay)
+                    except (ValueError, TypeError):
+                        pass
+
+                prev_ts = received_at
+
+                payload_raw = row.get("payload")
+                if isinstance(payload_raw, str):
+                    payload_data = json.loads(payload_raw)
+                else:
+                    payload_data = payload_raw or {}
+
+                event_type = row.get("event_type", "unknown")
+
+                sse_data = json.dumps({
+                    "event_id": row.get("event_id"),
+                    "replay_position": i,
+                    "replay_total": total,
+                    **payload_data,
+                })
+                yield {"event": event_type, "data": sse_data}
+
+                # Emit any messages whose timestamp falls before the next event (touchpoint 4)
+                while msg_idx < len(messages_list):
+                    msg = messages_list[msg_idx]
+                    msg_ts = msg.get("timestamp")
+                    # Check if next event has a later timestamp
+                    next_event_ts = events_list[i + 1].get("received_at") if i + 1 < total else None
+                    if next_event_ts is not None and msg_ts is not None:
+                        try:
+                            if isinstance(msg_ts, str):
+                                mt = datetime.fromisoformat(msg_ts.replace("Z", "+00:00"))
+                            else:
+                                mt = msg_ts
+                            if isinstance(next_event_ts, str):
+                                nt = datetime.fromisoformat(next_event_ts.replace("Z", "+00:00"))
+                            else:
+                                nt = next_event_ts
+                            if mt >= nt:
+                                break
+                        except (ValueError, TypeError):
+                            break
+                    elif next_event_ts is not None:
+                        break
+
+                    msg_data = json.dumps({
+                        "message_id": msg.get("message_id"),
+                        "agent_id": msg.get("agent_id"),
+                        "session_id": msg.get("session_id"),
+                        "role": msg.get("role"),
+                        "sequence": msg.get("sequence"),
+                        "synthetic": msg.get("synthetic", False),
+                        "content_preview": msg.get("content_preview", ""),
+                        "replay_position": i,
+                        "replay_total": total,
+                    })
+                    yield {"event": "message", "data": msg_data}
+                    msg_idx += 1
+
+            yield {
+                "event": "replay_end",
+                "data": json.dumps({
+                    "session_id": session_id,
+                    "total_events": total,
+                }),
+            }
+        finally:
+            _replay_states.pop(session_id, None)
+
+    return EventSourceResponse(replay_generator())
+
+
+@app.post("/api/sessions/{session_id}/replay/control")
+async def replay_control(session_id: str, request: Request):
+    """Control an active replay: pause, resume, seek, speed, or stop."""
+    state = _replay_states.get(session_id)
+    if not state:
+        return JSONResponse({"error": "No active replay for this session"}, status_code=404)
+
+    body = await request.json()
+    action = body.get("action")
+
+    if action == "pause":
+        state["paused"] = True
+        state["pause_event"].clear()
+        return {"status": "paused", "position": state["position"]}
+
+    elif action == "resume":
+        state["paused"] = False
+        state["pause_event"].set()
+        return {"status": "playing", "position": state["position"]}
+
+    elif action == "seek":
+        position = body.get("position", 0)
+        if not isinstance(position, int) or position < 0 or position >= state["total"]:
+            return JSONResponse({"error": "Invalid position"}, status_code=400)
+        state["position"] = position
+        return {"status": "paused" if state["paused"] else "playing", "position": position}
+
+    elif action == "speed":
+        speed = body.get("speed", 1)
+        if not isinstance(speed, (int, float)) or speed < 0:
+            return JSONResponse({"error": "Invalid speed"}, status_code=400)
+        state["speed"] = speed
+        return {"status": "ok", "speed": speed}
+
+    elif action == "stop":
+        state["cancelled"] = True
+        state["pause_event"].set()
+        return {"status": "stopped"}
+
+    else:
+        return JSONResponse({"error": f"Unknown action: {action}"}, status_code=400)
+
+
+@app.get("/api/sessions/{session_id}/replay/status")
+async def replay_status(session_id: str):
+    """Get current replay state for a session."""
+    state = _replay_states.get(session_id)
+    if not state:
+        return {"active": False}
+    return {
+        "active": True,
+        "paused": state["paused"],
+        "position": state["position"],
+        "total": state["total"],
+        "speed": state["speed"],
+    }
