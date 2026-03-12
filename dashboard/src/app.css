@@ -12,6 +12,7 @@
 	--color-text-muted: #64748B;
 	--color-border: #1E3A4A;
 
+	/* Tool family colors */
 	--tool-file: #7EB8DA;
 	--tool-exec: #B8A9E8;
 	--tool-agent: #0A9396;
@@ -65,11 +66,6 @@ body {
 @keyframes pulse-dot {
 	0%, 100% { opacity: 0.6; }
 	50% { opacity: 1; }
-}
-
-@keyframes pulse-pip {
-	0%, 100% { opacity: 0.3; }
-	50% { opacity: 0.6; }
 }
 
 .font-mono {

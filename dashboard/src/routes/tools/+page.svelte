@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
 	import EventRow from '$lib/components/EventRow.svelte';
 	import { toolEvents, toolNames, unreadToolCount } from '$lib/stores/events';
 	import type { ObserverEvent } from '$lib/types/events';
@@ -8,10 +9,19 @@
 	let filterTypes = $state<Set<string>>(new Set());
 	let filterTool = $state('');
 	let filterStatus = $state<'all' | 'success' | 'failure'>('all');
+	let filterAgent = $state('');
 	let scrollContainer: HTMLDivElement;
 	let wasScrolledUp = false;
 
 	const typeOptions = ['PreToolUse', 'PostToolUse', 'PostToolUseFailure'] as const;
+
+	// Read agent filter from URL query param
+	$effect(() => {
+		const agentParam = $page.url.searchParams.get('agent');
+		if (agentParam) {
+			filterAgent = agentParam;
+		}
+	});
 
 	function toggleType(type: string) {
 		filterTypes = new Set(filterTypes);
@@ -32,6 +42,10 @@
 		if (filterTool) {
 			const lower = filterTool.toLowerCase();
 			result = result.filter((e) => e.tool_name?.toLowerCase().includes(lower));
+		}
+
+		if (filterAgent) {
+			result = result.filter((e) => e.agent_id === filterAgent);
 		}
 
 		if (filterStatus === 'success') {
@@ -58,6 +72,14 @@
 			scrollContainer.scrollTop = 0;
 			wasScrolledUp = false;
 		}
+	}
+
+	function clearAgentFilter() {
+		filterAgent = '';
+		// Update URL without the agent param
+		const url = new URL(window.location.href);
+		url.searchParams.delete('agent');
+		window.history.replaceState({}, '', url.toString());
 	}
 
 	onMount(() => {
@@ -119,6 +141,17 @@
 			<option value="success">Success</option>
 			<option value="failure">Failure</option>
 		</select>
+
+		{#if filterAgent}
+			<button
+				onclick={clearAgentFilter}
+				class="px-2 py-1 rounded text-xs cursor-pointer border-none flex items-center gap-1"
+				style="background: var(--color-primary); color: white;"
+			>
+				Agent: <span class="font-mono">{filterAgent.slice(0, 8)}...</span>
+				<span>&times;</span>
+			</button>
+		{/if}
 
 		<div class="flex-1"></div>
 
