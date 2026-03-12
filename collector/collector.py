@@ -11,7 +11,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from anthropic import Anthropic
 
-from .ledger import init_db, write_event, query_events, get_sessions, get_active_sessions
+from .ledger import (
+    init_db, write_event, query_events, get_sessions, get_active_sessions,
+    save_session, unsave_session, get_saved_sessions, update_saved_session,
+)
 from .graph import init_graph, materialize_event, get_session_graph, get_session_timeline, reset_graph
 from . import nl_query
 
@@ -115,6 +118,43 @@ async def list_sessions():
 @app.get("/api/sessions/active")
 async def list_active_sessions():
     return get_active_sessions(_db)
+
+
+@app.get("/api/sessions/saved")
+async def list_saved_sessions():
+    return get_saved_sessions(_db)
+
+
+@app.post("/api/sessions/{session_id}/save")
+async def save_session_endpoint(session_id: str, request: Request):
+    body = await request.json()
+    name = body.get("name", session_id)
+    notes = body.get("notes")
+    tags = body.get("tags")
+    try:
+        result = save_session(_db, session_id, name, notes, tags)
+        return result
+    except Exception as e:
+        logger.exception("Failed to save session %s", session_id)
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.delete("/api/sessions/{session_id}/save")
+async def unsave_session_endpoint(session_id: str):
+    unsave_session(_db, session_id)
+    return {"status": "ok", "session_id": session_id}
+
+
+@app.put("/api/sessions/{session_id}/save")
+async def update_saved_session_endpoint(session_id: str, request: Request):
+    body = await request.json()
+    name = body.get("name")
+    notes = body.get("notes")
+    tags = body.get("tags")
+    result = update_saved_session(_db, session_id, name, notes, tags)
+    if result is None:
+        return JSONResponse(status_code=404, content={"error": "Session not saved"})
+    return result
 
 
 @app.get("/api/events")

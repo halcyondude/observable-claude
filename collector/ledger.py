@@ -22,13 +22,32 @@ CREATE INDEX IF NOT EXISTS idx_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_time ON events(received_at);
 """
 
+SAVED_SESSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS saved_sessions (
+  session_id       VARCHAR PRIMARY KEY,
+  name             VARCHAR NOT NULL,
+  notes            TEXT,
+  tags             VARCHAR,
+  saved_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  event_count      INTEGER,
+  agent_count      INTEGER,
+  duration_seconds DOUBLE
+);
+CREATE INDEX IF NOT EXISTS idx_saved_at ON saved_sessions(saved_at);
+"""
 
-def init_db(path: str) -> duckdb.DuckDBPyConnection:
-    conn = duckdb.connect(path)
-    for stmt in DDL.strip().split(";"):
+
+def _exec_ddl(conn: duckdb.DuckDBPyConnection, ddl: str):
+    for stmt in ddl.strip().split(";"):
         stmt = stmt.strip()
         if stmt:
             conn.execute(stmt)
+
+
+def init_db(path: str) -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(path)
+    _exec_ddl(conn, DDL)
+    _exec_ddl(conn, SAVED_SESSIONS_DDL)
     return conn
 
 
@@ -83,13 +102,15 @@ def query_events(
 def get_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     rows = conn.execute(
         """
-        SELECT session_id,
-               MIN(received_at) AS first_event,
-               MAX(received_at) AS last_event,
-               MAX(cwd) AS cwd
-        FROM events
-        WHERE session_id IS NOT NULL
-        GROUP BY session_id
+        SELECT e.session_id,
+               MIN(e.received_at) AS first_event,
+               MAX(e.received_at) AS last_event,
+               MAX(e.cwd) AS cwd,
+               CASE WHEN sv.session_id IS NOT NULL THEN true ELSE false END AS saved
+        FROM events e
+        LEFT JOIN saved_sessions sv ON e.session_id = sv.session_id
+        WHERE e.session_id IS NOT NULL
+        GROUP BY e.session_id, sv.session_id
         ORDER BY first_event DESC
         """
     ).fetchall()
@@ -103,8 +124,10 @@ def get_active_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
         SELECT s.session_id,
                MIN(s.received_at) AS first_event,
                MAX(s.received_at) AS last_event,
-               MAX(s.cwd) AS cwd
+               MAX(s.cwd) AS cwd,
+               CASE WHEN sv.session_id IS NOT NULL THEN true ELSE false END AS saved
         FROM events s
+        LEFT JOIN saved_sessions sv ON s.session_id = sv.session_id
         WHERE s.session_id IS NOT NULL
           AND s.session_id IN (
               SELECT session_id FROM events WHERE event_type = 'SessionStart'
@@ -112,9 +135,93 @@ def get_active_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
           AND s.session_id NOT IN (
               SELECT session_id FROM events WHERE event_type = 'SessionEnd'
           )
-        GROUP BY s.session_id
+        GROUP BY s.session_id, sv.session_id
         ORDER BY first_event DESC
         """
     ).fetchall()
     columns = [desc[0] for desc in conn.description]
     return [dict(zip(columns, row)) for row in rows]
+
+
+def save_session(
+    conn: duckdb.DuckDBPyConnection,
+    session_id: str,
+    name: str,
+    notes: str | None = None,
+    tags: str | None = None,
+) -> dict:
+    stats = conn.execute(
+        """
+        SELECT COUNT(*) AS event_count,
+               COUNT(DISTINCT agent_id) AS agent_count,
+               EXTRACT(EPOCH FROM (MAX(received_at) - MIN(received_at))) AS duration_seconds
+        FROM events
+        WHERE session_id = ?
+        """,
+        [session_id],
+    ).fetchone()
+
+    event_count, agent_count, duration_seconds = stats
+
+    conn.execute(
+        """
+        INSERT INTO saved_sessions (session_id, name, notes, tags, event_count, agent_count, duration_seconds)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [session_id, name, notes, tags, event_count, agent_count, duration_seconds],
+    )
+
+    row = conn.execute(
+        "SELECT * FROM saved_sessions WHERE session_id = ?", [session_id]
+    ).fetchone()
+    columns = [desc[0] for desc in conn.description]
+    return dict(zip(columns, row))
+
+
+def unsave_session(conn: duckdb.DuckDBPyConnection, session_id: str) -> bool:
+    conn.execute("DELETE FROM saved_sessions WHERE session_id = ?", [session_id])
+    return True
+
+
+def get_saved_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM saved_sessions ORDER BY saved_at DESC"
+    ).fetchall()
+    columns = [desc[0] for desc in conn.description]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def update_saved_session(
+    conn: duckdb.DuckDBPyConnection,
+    session_id: str,
+    name: str | None = None,
+    notes: str | None = None,
+    tags: str | None = None,
+) -> dict | None:
+    existing = conn.execute(
+        "SELECT * FROM saved_sessions WHERE session_id = ?", [session_id]
+    ).fetchone()
+    if not existing:
+        return None
+
+    columns = [desc[0] for desc in conn.description]
+    current = dict(zip(columns, existing))
+
+    updated_name = name if name is not None else current["name"]
+    updated_notes = notes if notes is not None else current["notes"]
+    updated_tags = tags if tags is not None else current["tags"]
+
+    conn.execute(
+        """
+        UPDATE saved_sessions
+        SET name = ?, notes = ?, tags = ?
+        WHERE session_id = ?
+        """,
+        [updated_name, updated_notes, updated_tags, session_id],
+    )
+
+    row = conn.execute(
+        "SELECT * FROM saved_sessions WHERE session_id = ?", [session_id]
+    ).fetchone()
+    columns = [desc[0] for desc in conn.description]
+    return dict(zip(columns, row))
