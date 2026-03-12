@@ -364,6 +364,20 @@ Each item:
 | `--color-text-muted` | `#64748B` | Gray — secondary labels |
 | `--color-border` | `#1E3A4A` | Subtle borders |
 
+#### Tool Family Colors
+
+Tool calls are classified into five families, each with a dedicated color token. These colors are distinct from the status palette (teal/gray/coral/amber) to avoid confusion between "what kind of tool" and "what happened."
+
+| Token | Hex | Family | Tools |
+|---|---|---|---|
+| `--tool-file` | `#7EB8DA` | File ops | Read, Write, Edit, Glob, Grep |
+| `--tool-exec` | `#B8A9E8` | Execution | Bash |
+| `--tool-agent` | `#0A9396` | Orchestration | Agent (reuses primary) |
+| `--tool-mcp` | `#E8A87C` | External services | mcp__* |
+| `--tool-meta` | `#94D2BD` | Internal bookkeeping | TodoRead, TodoWrite, TaskCreate, etc. (reuses success) |
+
+Classification rule: `mcp__` prefix = MCP family. Named matches for File, Exec, Agent. Everything else = Meta. No ambiguity.
+
 ### Typography
 
 | Element | Font / Size / Weight | Usage |
@@ -390,6 +404,16 @@ Each item:
 **Stat Card:** Label (11px muted, top) + value (32px bold, center) + delta (11px colored, bottom). 88px height, `--color-surface` background, `--radius-md` corners. No animation on value update.
 
 **Event Row:** 48px collapsed, auto-height expanded (min 200px). 4px colored left border. 150ms ease-out expand animation. Expanded JSON: dark background, teal keys, amber strings, mint numbers.
+
+**Tool Pip:** 8px circle, solid fill in tool family color. Status encoding: success = solid fill, failed = family color + 1px coral ring, pending = 40% opacity + pulse animation. Optional duration scaling: 6px (<100ms) to 14px (>2s). Duration outliers (>p95) get an amber outer glow.
+
+**Tool Strip:** Horizontal sequence of Tool Pips showing an agent's tool call history, left-to-right chronological. 2px gap between pips. Fills available width; overflows with fade-out gradient and "+N" count. Used in Spawn Tree detail panel and anywhere an agent's tool pattern needs to be shown inline.
+
+**Tool Family Bar:** Stacked horizontal bar (12px tall) showing the proportion of each tool family in an agent's or session's tool calls. Each segment colored by family token. Hover a segment to see the count and percentage.
+
+**Tool Summary:** One-line stats: total tool calls, success rate (percentage), median duration (ms). Used in detail panels below the Tool Family Bar.
+
+Full spec: [`docs/plans/tool-call-visualization.md`](plans/tool-call-visualization.md).
 
 ### Layout
 
