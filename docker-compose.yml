@@ -18,14 +18,11 @@ services:
       timeout: 3s
       retries: 3
 
-  # Dashboard - uncomment in Phase 5
-  # dashboard:
-  #   build: ./dashboard
-  #   ports:
-  #     - "3000:80"
-  #   environment:
-  #     PUBLIC_COLLECTOR_URL: http://localhost:4002
-  #   depends_on:
-  #     collector:
-  #       condition: service_healthy
-  #   restart: unless-stopped
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: unless-stopped
