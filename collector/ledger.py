@@ -20,6 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_pair ON events(tool_use_id);
 CREATE INDEX IF NOT EXISTS idx_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_time ON events(received_at);
+CREATE INDEX IF NOT EXISTS idx_cwd ON events(cwd);
 """
 
 
@@ -95,6 +96,79 @@ def get_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     ).fetchall()
     columns = [desc[0] for desc in conn.description]
     return [dict(zip(columns, row)) for row in rows]
+
+
+def get_grouped_sessions(
+    conn: duckdb.DuckDBPyConnection,
+    since: str | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    """Return sessions grouped by workspace (cwd) with aggregate stats."""
+    params = []
+    where_clauses = ["session_id IS NOT NULL", "cwd IS NOT NULL"]
+
+    if since:
+        where_clauses.append("received_at >= ?::TIMESTAMPTZ")
+        params.append(since)
+
+    where = " AND ".join(where_clauses)
+
+    # Get ended session IDs for status detection
+    ended_rows = conn.execute(
+        "SELECT DISTINCT session_id FROM events WHERE event_type = 'SessionEnd'"
+    ).fetchall()
+    ended_sessions = {row[0] for row in ended_rows}
+
+    # Get session-level aggregates
+    limit_clause = f"LIMIT {int(limit)}" if limit else ""
+    rows = conn.execute(
+        f"""
+        SELECT session_id,
+               MAX(cwd) AS cwd,
+               MIN(received_at) AS start_ts,
+               MAX(received_at) AS end_ts,
+               COUNT(*) AS event_count,
+               COUNT(DISTINCT agent_id) FILTER (WHERE agent_id IS NOT NULL) AS agent_count
+        FROM events
+        WHERE {where}
+        GROUP BY session_id
+        ORDER BY start_ts DESC
+        """,
+        params,
+    ).fetchall()
+
+    # Group by cwd
+    workspace_map: dict[str, dict] = {}
+    for row in rows:
+        session_id, cwd, start_ts, end_ts, event_count, agent_count = row
+        is_active = session_id not in ended_sessions
+
+        session = {
+            "session_id": session_id,
+            "cwd": cwd,
+            "branch": "",
+            "start_ts": start_ts.isoformat() if hasattr(start_ts, "isoformat") else str(start_ts),
+            "end_ts": end_ts.isoformat() if hasattr(end_ts, "isoformat") else str(end_ts),
+            "status": "active" if is_active else "complete",
+            "event_count": event_count,
+            "agent_count": agent_count,
+        }
+
+        if cwd not in workspace_map:
+            name = cwd.rstrip("/").rsplit("/", 1)[-1] if "/" in cwd else cwd
+            workspace_map[cwd] = {
+                "workspace": {"path": cwd, "name": name},
+                "sessions": [],
+            }
+        workspace_map[cwd]["sessions"].append(session)
+
+    # Apply per-workspace limit if specified
+    result = list(workspace_map.values())
+    if limit:
+        for group in result:
+            group["sessions"] = group["sessions"][:limit]
+
+    return result
 
 
 def get_active_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:

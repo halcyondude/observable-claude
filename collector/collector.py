@@ -11,7 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from anthropic import Anthropic
 
-from .ledger import init_db, write_event, query_events, get_sessions, get_active_sessions
+from .ledger import init_db, write_event, query_events, get_sessions, get_active_sessions, get_grouped_sessions
 from .graph import init_graph, materialize_event, get_session_graph, get_session_timeline, reset_graph
 from . import nl_query
 
@@ -115,6 +115,32 @@ async def list_sessions():
 @app.get("/api/sessions/active")
 async def list_active_sessions():
     return get_active_sessions(_db)
+
+
+@app.get("/api/sessions/grouped")
+async def grouped_sessions(
+    since: str | None = Query(None, description="ISO timestamp — only include sessions with events after this time"),
+    limit: int | None = Query(None, ge=1, le=100, description="Max sessions per workspace"),
+):
+    groups = get_grouped_sessions(_db, since=since, limit=limit)
+
+    # Enrich with branch info from LadybugDB if available
+    if _graph_conn:
+        try:
+            result = _graph_conn.execute(
+                "MATCH (s:Session) WHERE s.branch IS NOT NULL AND s.branch <> '' "
+                "RETURN s.session_id, s.branch"
+            )
+            branch_map = {row[0]: row[1] for row in result.get_all()}
+            for group in groups:
+                for session in group["sessions"]:
+                    branch = branch_map.get(session["session_id"], "")
+                    if branch:
+                        session["branch"] = branch
+        except Exception:
+            logger.exception("Failed to enrich sessions with branch data")
+
+    return groups
 
 
 @app.get("/api/events")

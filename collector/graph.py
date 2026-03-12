@@ -1,5 +1,6 @@
 import json
 import logging
+import subprocess
 from datetime import datetime, timezone
 
 from real_ladybug import Database, Connection
@@ -7,10 +8,12 @@ from real_ladybug import Database, Connection
 logger = logging.getLogger(__name__)
 
 DDL_STATEMENTS = [
-    "CREATE NODE TABLE IF NOT EXISTS Session (session_id STRING, cwd STRING, start_ts STRING, end_ts STRING, PRIMARY KEY (session_id))",
+    "CREATE NODE TABLE IF NOT EXISTS Workspace (path STRING, name STRING, PRIMARY KEY (path))",
+    "CREATE NODE TABLE IF NOT EXISTS Session (session_id STRING, cwd STRING, branch STRING, start_ts STRING, end_ts STRING, PRIMARY KEY (session_id))",
     "CREATE NODE TABLE IF NOT EXISTS Agent (agent_id STRING, agent_type STRING, session_id STRING, start_ts STRING, end_ts STRING, status STRING, PRIMARY KEY (agent_id))",
     "CREATE NODE TABLE IF NOT EXISTS Skill (name STRING, path STRING, PRIMARY KEY (name))",
     "CREATE NODE TABLE IF NOT EXISTS Tool (name STRING, PRIMARY KEY (name))",
+    "CREATE REL TABLE IF NOT EXISTS CONTAINS (FROM Workspace TO Session, first_seen STRING)",
     "CREATE REL TABLE IF NOT EXISTS SPAWNED (FROM Session TO Agent, FROM Agent TO Agent, prompt STRING, depth INT64, spawned_at STRING)",
     "CREATE REL TABLE IF NOT EXISTS LOADED (FROM Agent TO Skill, loaded_at STRING)",
     "CREATE REL TABLE IF NOT EXISTS INVOKED (FROM Agent TO Tool, tool_use_id STRING, tool_input STRING, start_ts STRING, end_ts STRING, duration_ms INT64, status STRING, tool_response STRING)",
@@ -20,10 +23,12 @@ DROP_STATEMENTS = [
     "DROP TABLE IF EXISTS INVOKED",
     "DROP TABLE IF EXISTS LOADED",
     "DROP TABLE IF EXISTS SPAWNED",
+    "DROP TABLE IF EXISTS CONTAINS",
     "DROP TABLE IF EXISTS Tool",
     "DROP TABLE IF EXISTS Skill",
     "DROP TABLE IF EXISTS Agent",
     "DROP TABLE IF EXISTS Session",
+    "DROP TABLE IF EXISTS Workspace",
 ]
 
 
@@ -77,15 +82,45 @@ def materialize_event(conn: Connection, event: dict) -> None:
 # --- Per-event handlers ---
 
 
+def _detect_git_branch(cwd: str) -> str:
+    """Detect the current git branch for a working directory. Returns empty string on failure."""
+    if not cwd:
+        return ""
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _handle_session_start(conn: Connection, event: dict) -> None:
     session_id = _extract(event, "session.session_id", "session_id")
     cwd = _extract(event, "session.cwd", "cwd") or ""
     ts = _extract(event, "event.timestamp", "timestamp") or _now_iso()
+    branch = _detect_git_branch(cwd)
 
     conn.execute(
-        "MERGE (s:Session {session_id: $sid}) SET s.cwd = $cwd, s.start_ts = $ts",
-        parameters={"sid": session_id, "cwd": cwd, "ts": ts},
+        "MERGE (s:Session {session_id: $sid}) SET s.cwd = $cwd, s.branch = $branch, s.start_ts = $ts",
+        parameters={"sid": session_id, "cwd": cwd, "branch": branch, "ts": ts},
     )
+
+    # Create Workspace node and CONTAINS edge
+    if cwd:
+        workspace_name = cwd.rstrip("/").rsplit("/", 1)[-1] if "/" in cwd else cwd
+        conn.execute(
+            "MERGE (w:Workspace {path: $path}) SET w.name = $name",
+            parameters={"path": cwd, "name": workspace_name},
+        )
+        conn.execute(
+            "MATCH (w:Workspace {path: $path}), (s:Session {session_id: $sid}) "
+            "CREATE (w)-[:CONTAINS {first_seen: $ts}]->(s)",
+            parameters={"path": cwd, "sid": session_id, "ts": ts},
+        )
 
 
 def _handle_session_end(conn: Connection, event: dict) -> None:
