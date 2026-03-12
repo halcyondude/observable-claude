@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { sessions, activeSessionId, liveSessionId, switchToSession } from '$lib/stores/session';
+	import { sessions, activeSessionId, liveSessionId, switchToSession, loadSessions as loadSessionsIntoStore } from '$lib/stores/session';
 	import { fetchSessions } from '$lib/services/api';
 	import type { SessionInfo } from '$lib/types/events';
 
@@ -10,7 +10,7 @@
 	async function loadSessions() {
 		try {
 			sessionList = await fetchSessions();
-			sessions.set(sessionList);
+			loadSessionsIntoStore(sessionList);
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to load sessions';
 		}

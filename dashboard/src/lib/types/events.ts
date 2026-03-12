@@ -9,6 +9,7 @@ export type EventType =
 	| 'SkillLoaded';
 
 export type AgentStatus = 'running' | 'complete' | 'failed';
+export type SessionStatus = 'active' | 'complete' | 'failed';
 export type ConnectionStatus = 'connected' | 'reconnecting' | 'disconnected';
 
 export interface ObserverEvent {
@@ -89,6 +90,25 @@ export interface QueryResult {
 	rows: Record<string, unknown>[];
 	is_graph?: boolean;
 	graph?: SessionGraph;
+}
+
+export interface SessionState {
+	session_id: string;
+	cwd: string;
+	branch?: string;
+	status: SessionStatus;
+	agent_count: number;
+	event_count: number;
+	start_ts: string;
+	end_ts?: string;
+}
+
+export interface WorkspaceState {
+	path: string;
+	name: string;
+	sessions: string[];
+	activeCount: number;
+	totalCount: number;
 }
 
 export interface ToolStats {

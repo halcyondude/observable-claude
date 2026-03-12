@@ -1,7 +1,14 @@
 import { connectionStatus, reconnectAttempt } from '$lib/stores/connection';
 import { events, unreadToolCount } from '$lib/stores/events';
-import { activeSessionId, liveSessionId, sessions } from '$lib/stores/session';
-import { fetchActiveSessions, fetchSessionGraph } from '$lib/services/api';
+import {
+	activeSessionId,
+	addSession,
+	endSession,
+	incrementSessionEvents,
+	updateSessionAgents,
+	loadSessions
+} from '$lib/stores/session';
+import { fetchActiveSessions } from '$lib/services/api';
 import { get } from 'svelte/store';
 import type { ObserverEvent } from '$lib/types/events';
 
@@ -32,20 +39,41 @@ export function connectSSE(): void {
 	eventSource.onmessage = (msg) => {
 		try {
 			const event: ObserverEvent = JSON.parse(msg.data);
+
+			// Push to global ring buffer (unchanged)
 			events.push(event);
 
+			// Route event to the correct session
+			const sessionId = event.session_id;
+
+			if (event.event_type === 'SessionStart') {
+				const cwd = event.cwd ?? event.payload?.cwd as string ?? '';
+				addSession(sessionId, cwd, event.received_at);
+
+				// Auto-focus the new session if nothing is active
+				if (!get(activeSessionId)) {
+					activeSessionId.set(sessionId);
+				}
+			} else if (event.event_type === 'SessionEnd') {
+				const failed = event.payload?.status === 'failed';
+				endSession(sessionId, event.received_at, failed);
+			} else {
+				// Increment event count for this session
+				incrementSessionEvents(sessionId);
+			}
+
+			// Track agent lifecycle
+			if (event.event_type === 'SubagentStart') {
+				updateSessionAgents(sessionId, 1);
+			}
+
+			// Tool use tracking (unchanged)
 			if (
 				event.event_type === 'PreToolUse' ||
 				event.event_type === 'PostToolUse' ||
 				event.event_type === 'PostToolUseFailure'
 			) {
 				unreadToolCount.update((n) => n + 1);
-			}
-
-			if (event.event_type === 'SessionStart') {
-				liveSessionId.set(event.session_id);
-				activeSessionId.set(event.session_id);
-				refreshSessionState();
 			}
 		} catch {
 			// ignore malformed messages
@@ -90,9 +118,12 @@ async function refreshSessionState(): Promise<void> {
 	try {
 		const activeSessions = await fetchActiveSessions();
 		if (activeSessions.length > 0) {
-			const latest = activeSessions[0];
-			liveSessionId.set(latest.session_id);
+			// Bulk-load all sessions into the multi-session store
+			loadSessions(activeSessions);
+
+			// Set active session if none selected
 			if (!get(activeSessionId)) {
+				const latest = activeSessions[0];
 				activeSessionId.set(latest.session_id);
 			}
 		}
