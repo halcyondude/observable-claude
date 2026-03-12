@@ -6,6 +6,7 @@
 	let autoCollapsed = $state(false);
 
 	const navItems = [
+		{ path: '/galaxy', label: 'Galaxy', icon: '\u2726', badgeStore: null },
 		{ path: '/tree', label: 'Spawn Tree', icon: '\u25C9', badgeStore: 'agents' },
 		{ path: '/timeline', label: 'Timeline', icon: '\u2503', badgeStore: null },
 		{ path: '/tools', label: 'Tool Feed', icon: '\u25B6', badgeStore: 'tools' },
@@ -35,7 +36,8 @@
 
 	function isActive(itemPath: string, currentPath: string): boolean {
 		if (itemPath === '/tree' && currentPath === '/') return true;
-		return currentPath.startsWith(itemPath);
+		if (itemPath === '/galaxy' && currentPath === '/galaxy') return true;
+		return currentPath.startsWith(itemPath) && itemPath !== '/galaxy';
 	}
 
 	function getBadge(item: typeof navItems[0]): number {

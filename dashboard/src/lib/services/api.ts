@@ -5,6 +5,7 @@ import type {
 	ObserverEvent,
 	QueryResult
 } from '$lib/types/events';
+import type { WorkspaceGroup, ActivityData } from '$lib/stores/workspace';
 
 const BASE = '';
 
@@ -64,4 +65,14 @@ export async function executeCypher(cypher: string): Promise<QueryResult> {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ cypher })
 	});
+}
+
+export async function fetchGroupedSessions(since?: string): Promise<WorkspaceGroup[]> {
+	const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+	return fetchJson(`/api/sessions/grouped${qs}`);
+}
+
+export async function fetchActivity(since?: string): Promise<ActivityData> {
+	const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+	return fetchJson(`/api/sessions/activity${qs}`);
 }
