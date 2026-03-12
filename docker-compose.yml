@@ -1,0 +1,31 @@
+services:
+  collector:
+    build: ./collector
+    ports:
+      - "4001:8000"
+      - "4002:8000"
+    volumes:
+      - ./data/duckdb:/data/duckdb
+      - ./data/kuzu:/data/kuzu
+    environment:
+      DUCKDB_PATH: /data/duckdb/events.db
+      KUZU_PATH: /data/kuzu
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Dashboard - uncomment in Phase 5
+  # dashboard:
+  #   build: ./dashboard
+  #   ports:
+  #     - "3000:80"
+  #   environment:
+  #     PUBLIC_COLLECTOR_URL: http://localhost:4002
+  #   depends_on:
+  #     collector:
+  #       condition: service_healthy
+  #   restart: unless-stopped
