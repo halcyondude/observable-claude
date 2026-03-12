@@ -3,7 +3,8 @@ import type {
 	SessionGraph,
 	TimelineAgent,
 	ObserverEvent,
-	QueryResult
+	QueryResult,
+	AgentMessage
 } from '$lib/types/events';
 
 const BASE = '';
@@ -64,4 +65,8 @@ export async function executeCypher(cypher: string): Promise<QueryResult> {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ cypher })
 	});
+}
+
+export async function getAgentMessages(agentId: string): Promise<AgentMessage[]> {
+	return fetchJson(`/api/agents/${agentId}/messages`);
 }
