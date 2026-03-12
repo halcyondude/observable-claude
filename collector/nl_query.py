@@ -15,6 +15,9 @@ Node tables:
 - Session(session_id STRING PK, cwd STRING, start_ts STRING, end_ts STRING)
 - Agent(agent_id STRING PK, agent_type STRING, session_id STRING, start_ts STRING, end_ts STRING, status STRING)
   - status values: 'running', 'complete', 'failed'
+- Message(message_id STRING PK, role STRING, content_preview STRING, sequence INT64, timestamp STRING, content_bytes INT64)
+  - role values: 'user', 'assistant', 'system'
+  - content_preview holds the first 500 chars of the message body
 - Skill(name STRING PK, path STRING)
 - Tool(name STRING PK) — e.g., 'Bash', 'Write', 'Read', 'Edit', 'Grep', 'Glob', 'Agent'
 
@@ -23,6 +26,8 @@ Relationship tables:
 - LOADED(FROM Agent TO Skill) — loaded_at STRING
 - INVOKED(FROM Agent TO Tool) — tool_use_id STRING, tool_input STRING, start_ts STRING, end_ts STRING, duration_ms INT64, status STRING, tool_response STRING
   - status values: 'pending', 'success', 'failed'
+- HAS_MESSAGE(FROM Agent TO Message) — sequence INT64
+- NEXT(FROM Message TO Message)
 
 ## Rules
 - All timestamps are ISO 8601 strings
@@ -51,6 +56,15 @@ Cypher: MATCH (a:Agent)-[:LOADED]->(s:Skill) RETURN DISTINCT s.name
 
 Question: What was the slowest tool call?
 Cypher: MATCH (a:Agent)-[r:INVOKED]->(t:Tool) WHERE r.duration_ms IS NOT NULL RETURN t.name, r.duration_ms, a.agent_id ORDER BY r.duration_ms DESC LIMIT 1
+
+Question: What prompts mention testing?
+Cypher: MATCH (a:Agent)-[:HAS_MESSAGE]->(m:Message) WHERE m.content_preview CONTAINS 'testing' RETURN a.agent_id, m.role, m.content_preview, m.timestamp ORDER BY m.timestamp
+
+Question: Show messages for the longest-running agent
+Cypher: MATCH (a:Agent) WHERE a.start_ts IS NOT NULL AND a.end_ts IS NOT NULL WITH a ORDER BY a.end_ts DESC LIMIT 1 MATCH (a)-[:HAS_MESSAGE]->(m:Message) RETURN a.agent_id, m.role, m.content_preview, m.sequence ORDER BY m.sequence
+
+Question: Show conversation history for a specific agent
+Cypher: MATCH (a:Agent {agent_id: $aid})-[:HAS_MESSAGE]->(m:Message) RETURN m.role, m.content_preview, m.sequence, m.timestamp ORDER BY m.sequence
 
 You MUST respond with valid JSON only: {"cypher": "...", "explanation": "..."}
 The explanation should be a brief one-line plain-English description of what the query does.

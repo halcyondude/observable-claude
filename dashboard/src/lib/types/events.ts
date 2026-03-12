@@ -99,3 +99,24 @@ export interface ToolStats {
 	p50_ms: number;
 	p95_ms: number;
 }
+
+export interface MessageSearchResult {
+	message_id: string;
+	session_id: string;
+	agent_id: string;
+	role: string;
+	sequence: number;
+	timestamp: string;
+	content_preview: string;
+	content_bytes: number;
+	snippet: string | null;
+}
+
+export interface MessageSearchParams {
+	q: string;
+	session_id?: string;
+	agent_id?: string;
+	role?: string;
+	limit?: number;
+	offset?: number;
+}

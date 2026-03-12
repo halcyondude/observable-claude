@@ -11,7 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from anthropic import Anthropic
 
-from .ledger import init_db, write_event, query_events, get_sessions, get_active_sessions
+from .ledger import init_db, write_event, query_events, get_sessions, get_active_sessions, search_messages, get_session_messages
 from .graph import init_graph, materialize_event, get_session_graph, get_session_timeline, reset_graph
 from . import nl_query
 
@@ -136,6 +136,44 @@ async def list_events(
     if tool_use_id:
         filters["tool_use_id"] = tool_use_id
     return query_events(_db, filters=filters, limit=limit, offset=offset)
+
+
+@app.get("/api/messages/search")
+async def message_search(
+    q: str = Query(..., min_length=1),
+    session_id: str | None = Query(None),
+    agent_id: str | None = Query(None),
+    role: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Full-text search across message content."""
+    try:
+        return search_messages(
+            _db,
+            q=q,
+            session_id=session_id,
+            agent_id=agent_id,
+            role=role,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as e:
+        logger.exception("Message search failed for q=%s", q)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Search failed", "details": str(e)},
+        )
+
+
+@app.get("/api/sessions/{session_id}/messages")
+async def session_messages(
+    session_id: str,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    """Get all messages across all agents in a session."""
+    return get_session_messages(_db, session_id, limit=limit, offset=offset)
 
 
 @app.get("/api/sessions/{session_id}/graph")

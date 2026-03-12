@@ -3,7 +3,9 @@ import type {
 	SessionGraph,
 	TimelineAgent,
 	ObserverEvent,
-	QueryResult
+	QueryResult,
+	MessageSearchResult,
+	MessageSearchParams
 } from '$lib/types/events';
 
 const BASE = '';
@@ -64,4 +66,15 @@ export async function executeCypher(cypher: string): Promise<QueryResult> {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ cypher })
 	});
+}
+
+export async function searchMessages(params: MessageSearchParams): Promise<MessageSearchResult[]> {
+	const searchParams = new URLSearchParams();
+	searchParams.set('q', params.q);
+	if (params.session_id) searchParams.set('session_id', params.session_id);
+	if (params.agent_id) searchParams.set('agent_id', params.agent_id);
+	if (params.role) searchParams.set('role', params.role);
+	if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
+	if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
+	return fetchJson(`/api/messages/search?${searchParams.toString()}`);
 }

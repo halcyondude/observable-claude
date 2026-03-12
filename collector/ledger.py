@@ -1,3 +1,5 @@
+import hashlib
+import re
 import uuid
 import json
 import duckdb
@@ -20,6 +22,23 @@ CREATE INDEX IF NOT EXISTS idx_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_pair ON events(tool_use_id);
 CREATE INDEX IF NOT EXISTS idx_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_time ON events(received_at);
+CREATE TABLE IF NOT EXISTS messages (
+  message_id    VARCHAR PRIMARY KEY,
+  event_id      VARCHAR,
+  session_id    VARCHAR NOT NULL,
+  agent_id      VARCHAR NOT NULL,
+  role          VARCHAR NOT NULL,
+  sequence      INTEGER NOT NULL,
+  timestamp     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  content       TEXT,
+  content_hash  VARCHAR,
+  content_bytes INTEGER,
+  metadata      JSON
+);
+CREATE INDEX IF NOT EXISTS idx_msg_agent ON messages(agent_id);
+CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_msg_role ON messages(role);
+CREATE INDEX IF NOT EXISTS idx_msg_hash ON messages(content_hash);
 """
 
 
@@ -118,3 +137,153 @@ def get_active_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     ).fetchall()
     columns = [desc[0] for desc in conn.description]
     return [dict(zip(columns, row)) for row in rows]
+
+
+def write_message(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    event_id: str | None,
+    session_id: str,
+    agent_id: str,
+    role: str,
+    sequence: int,
+    content: str | None,
+    metadata: dict | None = None,
+) -> str:
+    """Write a message to the messages table. Returns the message_id."""
+    message_id = str(uuid.uuid4())
+    content_hash = hashlib.sha256(content.encode()).hexdigest() if content else None
+    content_bytes = len(content.encode()) if content else 0
+
+    conn.execute(
+        """
+        INSERT INTO messages (message_id, event_id, session_id, agent_id, role, sequence, content, content_hash, content_bytes, metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            message_id,
+            event_id,
+            session_id,
+            agent_id,
+            role,
+            sequence,
+            content,
+            content_hash,
+            content_bytes,
+            json.dumps(metadata) if metadata else None,
+        ],
+    )
+    return message_id
+
+
+def _build_snippet(content: str, query: str, context_chars: int = 50) -> str | None:
+    """Build a snippet showing the match in context with **bold** markers."""
+    if not content or not query:
+        return None
+    try:
+        match = re.search(query, content, re.IGNORECASE)
+    except re.error:
+        # Fall back to literal substring search
+        idx = content.lower().find(query.lower())
+        if idx == -1:
+            return None
+        match_text = content[idx : idx + len(query)]
+        start = max(0, idx - context_chars)
+        end = min(len(content), idx + len(query) + context_chars)
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if end < len(content) else ""
+        before = content[start:idx]
+        after = content[idx + len(query) : end]
+        return f"{prefix}{before}**{match_text}**{after}{suffix}"
+
+    if not match:
+        return None
+
+    start = max(0, match.start() - context_chars)
+    end = min(len(content), match.end() + context_chars)
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(content) else ""
+    before = content[start : match.start()]
+    after = content[match.end() : end]
+    return f"{prefix}{before}**{match.group()}**{after}{suffix}"
+
+
+def search_messages(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    q: str,
+    session_id: str | None = None,
+    agent_id: str | None = None,
+    role: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Full-text search across message content. Returns results with snippets."""
+    clauses = ["regexp_matches(content, ?)"]
+    params: list = [q]
+
+    if session_id:
+        clauses.append("session_id = ?")
+        params.append(session_id)
+    if agent_id:
+        clauses.append("agent_id = ?")
+        params.append(agent_id)
+    if role:
+        clauses.append("role = ?")
+        params.append(role)
+
+    where = " AND ".join(clauses)
+    params.extend([limit, offset])
+
+    rows = conn.execute(
+        f"""
+        SELECT message_id, session_id, agent_id, role, sequence, timestamp,
+               content, content_bytes
+        FROM messages
+        WHERE {where}
+        ORDER BY timestamp DESC
+        LIMIT ? OFFSET ?
+        """,
+        params,
+    ).fetchall()
+
+    columns = [desc[0] for desc in conn.description]
+    results = []
+    for row in rows:
+        rec = dict(zip(columns, row))
+        content = rec.pop("content", None) or ""
+        rec["content_preview"] = content[:500]
+        rec["snippet"] = _build_snippet(content, q)
+        results.append(rec)
+
+    return results
+
+
+def get_session_messages(
+    conn: duckdb.DuckDBPyConnection,
+    session_id: str,
+    limit: int = 200,
+    offset: int = 0,
+) -> list[dict]:
+    """Get all messages across all agents in a session, ordered by timestamp."""
+    rows = conn.execute(
+        """
+        SELECT message_id, session_id, agent_id, role, sequence, timestamp,
+               content, content_bytes
+        FROM messages
+        WHERE session_id = ?
+        ORDER BY timestamp ASC
+        LIMIT ? OFFSET ?
+        """,
+        [session_id, limit, offset],
+    ).fetchall()
+
+    columns = [desc[0] for desc in conn.description]
+    results = []
+    for row in rows:
+        rec = dict(zip(columns, row))
+        content = rec.pop("content", None) or ""
+        rec["content_preview"] = content[:500]
+        results.append(rec)
+
+    return results
