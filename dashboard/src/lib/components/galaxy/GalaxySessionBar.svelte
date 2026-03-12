@@ -1,18 +1,24 @@
 <script lang="ts">
 	import type { SessionInfo } from '$lib/types/events';
+	import { goto } from '$app/navigation';
+	import { activeSessionId } from '$lib/stores/session';
 
 	let {
 		session,
 		timeStart,
 		timeEnd,
 		isSelected = false,
-		onclick
+		isFocused = false,
+		onclick,
+		compact = false
 	}: {
 		session: SessionInfo;
 		timeStart: number;
 		timeEnd: number;
 		isSelected?: boolean;
+		isFocused?: boolean;
 		onclick: () => void;
+		compact?: boolean;
 	} = $props();
 
 	const totalRange = $derived(timeEnd - timeStart);
@@ -35,8 +41,8 @@
 	const isActive = $derived(session.is_active);
 	const isFailed = $derived(session.end_time && !session.is_active && (session as any).status === 'failed');
 
-	// Show inline labels only if bar is wide enough
-	const barWidthPx = $derived(widthPct > 0 ? (widthPct / 100) * 1200 : 0); // rough estimate
+	// Check if session is saved/bookmarked
+	const isSaved = $derived((session as any).is_saved === true || (session as any).bookmarked === true);
 
 	const sessionIdShort = $derived(
 		session.session_id.length > 12
@@ -52,9 +58,28 @@
 	}
 
 	const duration = $derived(formatDuration(sessionEnd - sessionStart));
+
 	const tooltipText = $derived(
-		`${session.session_id}\n${duration} | ${session.agent_count} agents | ${session.event_count} events`
+		`ID: ${session.session_id}\n` +
+		((session as any).branch ? `Branch: ${(session as any).branch}\n` : '') +
+		`Duration: ${duration}\n` +
+		`Agents: ${session.agent_count}\n` +
+		`Events: ${session.event_count}`
 	);
+
+	// Border style: focus > selected > failed > default
+	const borderStyle = $derived(() => {
+		if (isFocused) return '2px solid rgba(10, 147, 150, 0.8)';
+		if (isSelected) return '2px solid var(--color-primary)';
+		if (isFailed) return 'none';
+		return '1px solid var(--color-border)';
+	});
+
+	function handleDblClick(e: MouseEvent) {
+		e.stopPropagation();
+		activeSessionId.set(session.session_id);
+		goto(`/tree?session=${session.session_id}`);
+	}
 </script>
 
 <button
@@ -65,17 +90,21 @@
 		height: {barHeight}px;
 		min-width: 4px;
 		background: {isActive ? 'rgba(10, 147, 150, 0.8)' : 'var(--color-surface-2)'};
-		border: {isSelected ? '2px solid var(--color-primary)' : isFailed ? 'none' : '1px solid var(--color-border)'};
+		border: {borderStyle()};
 		{isFailed ? 'border-left: 4px solid var(--color-error);' : ''}
-		transition: filter 0.15s ease;
+		transition: filter 0.15s ease, border-color 0.15s ease;
 	"
 	title={tooltipText}
 	{onclick}
+	ondblclick={handleDblClick}
 	onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.filter = 'brightness(1.2)'; }}
 	onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.filter = ''; }}
 >
-	{#if widthPct > 6}
+	{#if !compact && widthPct > 6}
 		<div class="flex items-center gap-2 px-1.5 h-full text-xs whitespace-nowrap overflow-hidden">
+			{#if isSaved}
+				<span style="color: var(--color-warning); font-size: 10px; flex-shrink: 0;" title="Saved session">&#9733;</span>
+			{/if}
 			<span class="font-mono opacity-80" style="font-size: 11px; color: {isActive ? 'white' : 'var(--color-text-muted)'};">
 				{sessionIdShort}
 			</span>

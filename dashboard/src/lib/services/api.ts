@@ -68,11 +68,15 @@ export async function executeCypher(cypher: string): Promise<QueryResult> {
 }
 
 export async function fetchGroupedSessions(since?: string): Promise<WorkspaceGroup[]> {
-	const qs = since ? `?since=${encodeURIComponent(since)}` : '';
-	return fetchJson(`/api/sessions/grouped${qs}`);
+	const params = new URLSearchParams();
+	if (since) params.set('since', since);
+	const qs = params.toString();
+	return fetchJson(`/api/sessions/grouped${qs ? `?${qs}` : ''}`);
 }
 
 export async function fetchActivity(since?: string): Promise<ActivityData> {
-	const qs = since ? `?since=${encodeURIComponent(since)}` : '';
-	return fetchJson(`/api/sessions/activity${qs}`);
+	const params = new URLSearchParams();
+	if (since) params.set('since', since);
+	const qs = params.toString();
+	return fetchJson(`/api/sessions/activity${qs ? `?${qs}` : ''}`);
 }

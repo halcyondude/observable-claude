@@ -9,13 +9,19 @@
 		timeStart,
 		timeEnd,
 		selectedSessionId,
-		onSelectSession
+		onSelectSession,
+		isFocusedLane = false,
+		focusedBarIndex = -1,
+		compact = false
 	}: {
 		workspace: WorkspaceGroup;
 		timeStart: number;
 		timeEnd: number;
 		selectedSessionId: string | null;
 		onSelectSession: (id: string) => void;
+		isFocusedLane?: boolean;
+		focusedBarIndex?: number;
+		compact?: boolean;
 	} = $props();
 
 	const isCollapsed = $derived($collapsedWorkspaces.has(workspace.workspace));
@@ -35,7 +41,10 @@
 
 <div
 	class="border-b"
-	style="border-color: var(--color-border);"
+	style="
+		border-color: var(--color-border);
+		{isFocusedLane ? 'outline: 1px solid rgba(10, 147, 150, 0.4); outline-offset: -1px;' : ''}
+	"
 >
 	<!-- Lane header -->
 	<button
@@ -51,9 +60,11 @@
 		<span class="text-sm font-semibold" style="color: var(--color-text);">
 			{name}
 		</span>
-		<span class="text-xs" style="color: var(--color-text-muted);">
-			{workspace.active_count > 0 ? `${workspace.active_count} active` : ''}{workspace.active_count > 0 ? ' \u00b7 ' : ''}{workspace.total_count} total
-		</span>
+		{#if !compact}
+			<span class="text-xs" style="color: var(--color-text-muted);">
+				{workspace.active_count > 0 ? `${workspace.active_count} active` : ''}{workspace.active_count > 0 ? ' \u00b7 ' : ''}{workspace.total_count} total
+			</span>
+		{/if}
 	</button>
 
 	<!-- Lane body -->
@@ -71,7 +82,9 @@
 							{timeStart}
 							{timeEnd}
 							isSelected={selectedSessionId === session.session_id}
+							isFocused={isFocusedLane && focusedBarIndex === i}
 							onclick={() => onSelectSession(session.session_id)}
+							{compact}
 						/>
 					</div>
 				{/each}

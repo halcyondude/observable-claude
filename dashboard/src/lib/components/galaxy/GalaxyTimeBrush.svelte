@@ -5,22 +5,24 @@
 
 	let {
 		activity,
-		workspaceColors
+		workspaceColors,
+		compact = false
 	}: {
 		activity: ActivityData | null;
 		workspaceColors: Map<string, string>;
+		compact?: boolean;
 	} = $props();
 
 	let container: HTMLDivElement;
 	let uplot: any = null;
-	let brushStart: number | null = null;
-	let brushEnd: number | null = null;
 	let isDragging = $state(false);
 	let dragMode: 'create' | 'move' | 'resize-left' | 'resize-right' | null = null;
 	let dragStartX = 0;
 	let selectionStartPx = 0;
 	let selectionWidthPx = 0;
 	let canvasWidth = 0;
+
+	const plotHeight = $derived(compact ? 48 : 64);
 
 	// Selection state as pixel positions within the plot area
 	let selLeft = $state<number | null>(null);
@@ -75,7 +77,7 @@
 
 			const opts: any = {
 				width: container.clientWidth,
-				height: 64,
+				height: plotHeight,
 				cursor: {
 					show: true,
 					x: true,
@@ -91,7 +93,7 @@
 				axes: [
 					{
 						stroke: '#64748B',
-						font: '10px Inter, system-ui',
+						font: `${compact ? 9 : 10}px Inter, system-ui`,
 						grid: { show: false },
 						ticks: { show: false }
 					},
@@ -133,17 +135,6 @@
 		const minT = timestamps[0];
 		const maxT = timestamps[timestamps.length - 1];
 		return (minT + frac * (maxT - minT)) * 1000;
-	}
-
-	function getXFromTime(timeMs: number): number {
-		if (!uplot || !activity || activity.buckets.length === 0) return 0;
-		const plotLeft = uplot.bbox.left / devicePixelRatio;
-		const plotWidth = uplot.bbox.width / devicePixelRatio;
-		const { timestamps } = buildData(activity);
-		const minT = timestamps[0] * 1000;
-		const maxT = timestamps[timestamps.length - 1] * 1000;
-		const frac = (timeMs - minT) / (maxT - minT);
-		return plotLeft + frac * plotWidth;
 	}
 
 	function handleMouseDown(e: MouseEvent) {
@@ -233,7 +224,7 @@
 
 	function handleResize() {
 		if (uplot && container) {
-			uplot.setSize({ width: container.clientWidth, height: 64 });
+			uplot.setSize({ width: container.clientWidth, height: plotHeight });
 			canvasWidth = container.clientWidth;
 		}
 	}
@@ -252,11 +243,11 @@
 	});
 </script>
 
-<div class="relative" style="height: 64px; user-select: none;">
+<div class="relative" style="height: {plotHeight}px; user-select: none;">
 	<div
 		bind:this={container}
 		class="w-full"
-		style="height: 64px;"
+		style="height: {plotHeight}px;"
 		role="slider"
 		tabindex="0"
 		aria-label="Time range selector"
