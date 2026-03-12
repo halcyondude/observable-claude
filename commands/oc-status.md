@@ -13,5 +13,5 @@ Check the health and activity of the CC Observer stack:
    - Total events ingested
    - Active sessions (count + session IDs)
    - Running agents (if any active sessions)
-   - Dashboard URL: http://localhost:3000
+   - Dashboard URL: http://localhost:4242
 4. If collector is not reachable, report it as down and suggest running `/oc:start`

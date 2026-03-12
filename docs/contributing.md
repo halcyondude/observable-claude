@@ -26,7 +26,7 @@ docker compose up -d
 curl http://localhost:4001/health
 # {"status": "ok", "events_total": 0, "uptime_seconds": ...}
 
-open http://localhost:3000
+open http://localhost:4242
 ```
 
 ### Local Collector Dev

@@ -35,7 +35,7 @@ git clone https://github.com/halcyondude/observable-claude.git
 cd observable-claude
 export ANTHROPIC_API_KEY=sk-ant-...
 docker compose up -d
-open http://localhost:3000
+open http://localhost:4242
 ```
 
 Full quickstart in the [README](https://github.com/halcyondude/observable-claude#readme).

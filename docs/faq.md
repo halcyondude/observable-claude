@@ -77,7 +77,7 @@ LadybugDB corrupted? Rebuild from DuckDB: `scripts/replay.py` or `POST /api/repl
 
 Four ways:
 
-1. **Dashboard Query Console** — NL or Cypher at `localhost:3000`
+1. **Dashboard Query Console** — NL or Cypher at `localhost:4242`
 2. **Plugin command** — `/oc:query which agents are running?`
 3. **Raw API** — `POST localhost:4002/api/cypher` with `{"cypher": "MATCH ..."}`
 4. **MCP tool** — `mcp__ladybug-observer__query` from Claude Code

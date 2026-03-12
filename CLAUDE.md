@@ -15,7 +15,7 @@ Real-time execution graph monitoring for Claude Code. Captures lifecycle events 
 
 - Claude Code hooks POST events to `localhost:4001`
 - Collector writes to DuckDB (immutable source of truth) and materializes graph in LadybugDB
-- Dashboard consumes SSE from collector on port 4002, served on port 3000
+- Dashboard consumes SSE from collector on port 4002, served on port 4242
 - LadybugDB MCP server gives Claude direct Cypher execution
 - `scripts/replay.py` rebuilds LadybugDB from DuckDB if needed
 

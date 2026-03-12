@@ -37,7 +37,7 @@ flowchart TB
     end
 
     subgraph DASH ["Dashboard (SvelteKit)"]
-        NGINX["nginx :3000"]
+        NGINX["nginx :4242"]
         SVELTE["Cytoscape.js"]
         NGINX --> SVELTE
     end
@@ -213,7 +213,7 @@ Two services, shared volumes.
 | Service | Image | Ports | Purpose |
 |---|---|---|---|
 | `collector` | `./collector` (Python 3.12) | `4001:8000`, `4002:8000` | Event ingestion, graph materialization, REST + SSE API |
-| `dashboard` | `./dashboard` (SvelteKit + nginx) | `3000:80` | Static SvelteKit build served by nginx, proxies API to collector |
+| `dashboard` | `./dashboard` (SvelteKit + nginx) | `4242:80` | Static SvelteKit build served by nginx, proxies API to collector |
 
 Ports 4001 and 4002 both map to internal port 8000. Single-process FastAPI app — the port split is for clarity (4001 = hooks, 4002 = dashboard API).
 
@@ -230,7 +230,7 @@ Data persists across container restarts and `docker compose down`. Only `docker 
 
 | Port | Service | Protocol | Purpose |
 |---|---|---|---|
-| `3000` | Dashboard | HTTP | SvelteKit UI |
+| `4242` | Dashboard | HTTP | SvelteKit UI |
 | `4001` | Collector | HTTP | Hook ingestion (`POST /events`) |
 | `4002` | Collector | HTTP + SSE | REST API (`/api/*`) + SSE (`/stream`) |
 

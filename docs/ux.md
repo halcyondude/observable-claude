@@ -7,7 +7,7 @@ description: Six dashboard views, design system, interaction patterns, and respo
 
 ## Overview
 
-Local-only, read-only, real-time monitoring at `http://localhost:3000`. Six views, each answering a different question about agent execution. Runs as a companion to your terminal.
+Local-only, read-only, real-time monitoring at `http://localhost:4242`. Six views, each answering a different question about agent execution. Runs as a companion to your terminal.
 
 ```mermaid
 stateDiagram-v2

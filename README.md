@@ -13,7 +13,7 @@ CC Observer gives you real-time visibility into what Claude Code is actually doi
 - **See the execution graph live** — watch agents spawn, tools fire, and tasks complete in a real-time directed graph
 - **Query with natural language** — ask "which agents are running?" or "what was the slowest tool call?" and get instant answers via NL-to-Cypher translation
 - **Dual storage for different questions** — DuckDB for raw event analytics, LadybugDB for graph traversal and topology queries
-- **Zero-config local setup** — one `docker compose up`, open `localhost:3000`, done
+- **Zero-config local setup** — one `docker compose up`, open `localhost:4242`, done
 
 ## Architecture
 
@@ -42,7 +42,7 @@ flowchart TB
             style LADY fill:#1E293B,stroke:#94D2BD,color:#F4F8FB
         end
 
-        DASH["Dashboard<br/>SvelteKit :3000"]
+        DASH["Dashboard<br/>SvelteKit :4242"]
         style DASH fill:#1E293B,stroke:#EE9B00,color:#F4F8FB
 
         style collector_svc fill:#0D1B2A,stroke:#0A9396,color:#F4F8FB
@@ -74,7 +74,7 @@ cd observable-claude
 docker compose up -d
 
 # 3. Open the dashboard
-open http://localhost:3000
+open http://localhost:4242
 ```
 
 That's it. The hooks in `hooks/hooks.json` automatically capture events from Claude Code sessions. Start using Claude Code normally and watch the dashboard light up.

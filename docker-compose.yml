@@ -21,7 +21,7 @@ services:
   dashboard:
     build: ./dashboard
     ports:
-      - "3000:80"
+      - "4242:80"
     depends_on:
       collector:
         condition: service_healthy
