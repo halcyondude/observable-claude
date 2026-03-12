@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import time
-import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Query
@@ -21,6 +20,7 @@ from .ledger import (
     write_message,
     get_agent_messages,
     search_messages,
+    get_session_messages,
 )
 from .graph import init_graph, materialize_event, get_session_graph, get_session_timeline, reset_graph
 from . import nl_query
@@ -74,11 +74,6 @@ async def ingest_event(request: Request):
             logger.exception("Graph materialization failed for event %s", event_id)
 
     event_type = payload.get("event", {}).get("event_type", payload.get("event_type", "unknown"))
-
-    # Extract and store prompt from SubagentStart events
-    if event_type == "SubagentStart":
-        _capture_subagent_prompt(payload)
-
     sse_data = json.dumps({"event_id": event_id, **payload})
 
     dead = []
@@ -153,6 +148,50 @@ async def list_events(
     return query_events(_db, filters=filters, limit=limit, offset=offset)
 
 
+@app.get("/api/messages/search")
+async def message_search(
+    q: str = Query(..., min_length=1),
+    session_id: str | None = Query(None),
+    agent_id: str | None = Query(None),
+    role: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Full-text search across message content."""
+    try:
+        return search_messages(
+            _db,
+            q=q,
+            session_id=session_id,
+            agent_id=agent_id,
+            role=role,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as e:
+        logger.exception("Message search failed for q=%s", q)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Search failed", "details": str(e)},
+        )
+
+
+@app.get("/api/agents/{agent_id}/messages")
+async def agent_messages(agent_id: str):
+    """Get all messages for a specific agent."""
+    return get_agent_messages(_db, agent_id)
+
+
+@app.get("/api/sessions/{session_id}/messages")
+async def session_messages(
+    session_id: str,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    """Get all messages across all agents in a session."""
+    return get_session_messages(_db, session_id, limit=limit, offset=offset)
+
+
 @app.get("/api/sessions/{session_id}/graph")
 async def session_graph(session_id: str):
     if not _graph_conn:
@@ -225,68 +264,6 @@ async def execute_cypher(request: Request):
     except Exception as e:
         logger.exception("Cypher execution failed: %s", cypher)
         return {"error": "Query execution failed", "cypher": cypher, "details": str(e)}
-
-
-def _extract_field(event: dict, nested_key: str, flat_key: str) -> str | None:
-    """Extract a value using the dual nested/flat pattern."""
-    parts = nested_key.split(".", 1)
-    if len(parts) == 2:
-        val = event.get(parts[0], {}).get(parts[1])
-        if val is not None:
-            return val
-    return event.get(flat_key)
-
-
-def _capture_subagent_prompt(payload: dict) -> None:
-    """Extract prompt from a SubagentStart event and write it as a message."""
-    prompt = _extract_field(payload, "event.prompt", "prompt")
-    if not prompt:
-        return
-
-    agent_id = _extract_field(payload, "session.agent_id", "agent_id")
-    session_id = _extract_field(payload, "session.session_id", "session_id")
-    ts = _extract_field(payload, "event.timestamp", "timestamp")
-
-    if not agent_id or not session_id:
-        return
-
-    message_id = str(uuid.uuid4())
-    try:
-        write_message(_db, message_id, session_id, agent_id, "user", prompt, 0, ts)
-    except Exception:
-        logger.exception("Failed to write prompt message for agent %s", agent_id)
-        return
-
-    # Broadcast message SSE event
-    msg_data = json.dumps({
-        "message_id": message_id,
-        "session_id": session_id,
-        "agent_id": agent_id,
-        "role": "user",
-        "sequence": 0,
-        "content_preview": prompt[:500],
-    })
-    dead = []
-    for q in _sse_clients:
-        try:
-            q.put_nowait(("message", msg_data))
-        except asyncio.QueueFull:
-            dead.append(q)
-    for q in dead:
-        _sse_clients.remove(q)
-
-
-@app.get("/api/agents/{agent_id}/messages")
-async def agent_messages(agent_id: str):
-    return get_agent_messages(_db, agent_id)
-
-
-@app.get("/api/messages/search")
-async def message_search(
-    q: str = Query(..., min_length=1),
-    session_id: str | None = Query(None),
-):
-    return search_messages(_db, q, session_id=session_id)
 
 
 @app.post("/api/replay")
