@@ -15,6 +15,10 @@
 		const viewRoutes = ['/tree', '/timeline', '/tools', '/analytics', '/query', '/sessions'];
 
 		function handleKeydown(e: KeyboardEvent) {
+			if (e.metaKey && e.key === '0') {
+				e.preventDefault();
+				goto('/galaxy');
+			}
 			if (e.metaKey && e.key >= '1' && e.key <= '6') {
 				e.preventDefault();
 				const idx = parseInt(e.key) - 1;

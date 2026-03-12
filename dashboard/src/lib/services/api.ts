@@ -8,6 +8,7 @@ import type {
 	MessageSearchResult,
 	MessageSearchParams
 } from '$lib/types/events';
+import type { WorkspaceGroup, ActivityData } from '$lib/stores/workspace';
 
 const BASE = '';
 
@@ -82,4 +83,18 @@ export async function searchMessages(params: MessageSearchParams): Promise<Messa
 	if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
 	if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
 	return fetchJson(`/api/messages/search?${searchParams.toString()}`);
+}
+
+export async function fetchGroupedSessions(since?: string): Promise<WorkspaceGroup[]> {
+	const params = new URLSearchParams();
+	if (since) params.set('since', since);
+	const qs = params.toString();
+	return fetchJson(`/api/sessions/grouped${qs ? `?${qs}` : ''}`);
+}
+
+export async function fetchActivity(since?: string): Promise<ActivityData> {
+	const params = new URLSearchParams();
+	if (since) params.set('since', since);
+	const qs = params.toString();
+	return fetchJson(`/api/sessions/activity${qs ? `?${qs}` : ''}`);
 }
