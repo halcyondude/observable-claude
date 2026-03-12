@@ -92,7 +92,8 @@ RETURN a.agent_id, t.name, r.tool_input, r.start_ts;
 - `POST http://localhost:4002/api/cypher` — raw Cypher execution
 
 ## Available Commands
-- `/observer:start` — start the Docker stack
-- `/observer:stop` — stop the Docker stack
-- `/observer:status` — check observer health and activity
-- `/observer:query [question]` — query the execution graph
+- `/oc:setup` — configure API key and verify environment
+- `/oc:start` — start the Docker stack
+- `/oc:stop` — stop the Docker stack
+- `/oc:status` — check observer health and activity
+- `/oc:query [question]` — query the execution graph

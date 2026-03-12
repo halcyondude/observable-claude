@@ -349,7 +349,7 @@ On disconnect, the dashboard retries with exponential backoff (1s, 2s, 4s, 8s, m
 | State | Display |
 |---|---|
 | Connecting | Centered spinner + "Connecting to observer..." |
-| No active session | "No active session. Run `/observer:start` in Claude Code." |
+| No active session | "No active session. Run `/oc:start` in Claude Code." |
 | Empty graph | Single Session node, label "Waiting for agents..." |
 | Query loading | Spinner in Ask button, skeleton rows in results |
 | Query empty | "No results" (plain text, not error) |

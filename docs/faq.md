@@ -32,7 +32,7 @@ Yes. The collector (Python/FastAPI) and dashboard (SvelteKit/nginx) run as Docke
 
 ### What if I don't have an Anthropic API key?
 
-The system works without one — everything except the NL-to-Cypher query feature (`/api/ask` and `/observer:query`). Event capture, graph materialization, the dashboard, and raw Cypher queries all work without an API key. The collector logs a warning at startup and the `/api/ask` endpoint returns an error response.
+The system works without one — everything except the NL-to-Cypher query feature (`/api/ask` and `/oc:query`). Event capture, graph materialization, the dashboard, and raw Cypher queries all work without an API key. The collector logs a warning at startup and the `/api/ask` endpoint returns an error response.
 
 ## Performance & Impact
 
@@ -80,7 +80,7 @@ If LadybugDB gets corrupted, it can be rebuilt from DuckDB using `scripts/replay
 Yes, three ways:
 
 1. **Dashboard Query Console** — type natural language or Cypher at `http://localhost:3000` (Query view)
-2. **Plugin command** — `/observer:query which agents are running?` from Claude Code
+2. **Plugin command** — `/oc:query which agents are running?` from Claude Code
 3. **Raw API** — `POST http://localhost:4002/api/cypher` with `{"cypher": "MATCH (s:Session) RETURN s"}`
 4. **MCP tool** — Claude Code can call `mcp__kuzu-observer__query` directly when the plugin is installed
 

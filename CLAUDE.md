@@ -24,7 +24,7 @@ Real-time execution graph monitoring for Claude Code. Captures lifecycle events 
 1. Docker stack + hook plumbing (FastAPI collector, DuckDB, LadybugDB, dual hook delivery)
 2. Graph materialization (per-event Cypher mutations, DDL, replay script)
 3. Plugin shell (plugin.json, commands, skill, agent, .mcp.json)
-4. NL→Cypher (Anthropic API, /api/ask endpoint, /observer:query command)
+4. NL→Cypher (Anthropic API, /api/ask endpoint, /oc:query command)
 5. Dashboard (SvelteKit + nginx, SSE + REST wiring)
 
 ## DreamTeams Plugins

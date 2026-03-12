@@ -65,10 +65,11 @@ cc-observer/
 ├── hooks/
 │   └── hooks.json               # Hook configuration (12 event types)
 ├── commands/
-│   ├── start.md                 # /observer:start
-│   ├── stop.md                  # /observer:stop
-│   ├── status.md                # /observer:status
-│   └── query.md                 # /observer:query [question]
+│   ├── oc-setup.md              # /oc:setup
+│   ├── oc-start.md              # /oc:start
+│   ├── oc-stop.md               # /oc:stop
+│   ├── oc-status.md             # /oc:status
+│   └── oc-query.md              # /oc:query [question]
 ├── skills/
 │   └── observer-context/
 │       └── SKILL.md             # Graph schema + query patterns for Claude
