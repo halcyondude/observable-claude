@@ -22,13 +22,34 @@ CREATE INDEX IF NOT EXISTS idx_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_time ON events(received_at);
 """
 
+MESSAGES_DDL = """
+CREATE TABLE IF NOT EXISTS messages (
+  message_id    VARCHAR PRIMARY KEY,
+  session_id    VARCHAR NOT NULL,
+  agent_id      VARCHAR NOT NULL,
+  role          VARCHAR NOT NULL,
+  content       TEXT,
+  sequence      INTEGER NOT NULL,
+  timestamp     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  content_bytes INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_msg_agent ON messages(agent_id);
+CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_msg_role ON messages(role);
+"""
 
-def init_db(path: str) -> duckdb.DuckDBPyConnection:
-    conn = duckdb.connect(path)
-    for stmt in DDL.strip().split(";"):
+
+def _run_ddl(conn: duckdb.DuckDBPyConnection, ddl: str) -> None:
+    for stmt in ddl.strip().split(";"):
         stmt = stmt.strip()
         if stmt:
             conn.execute(stmt)
+
+
+def init_db(path: str) -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(path)
+    _run_ddl(conn, DDL)
+    _run_ddl(conn, MESSAGES_DDL)
     return conn
 
 
@@ -115,6 +136,62 @@ def get_active_sessions(conn: duckdb.DuckDBPyConnection) -> list[dict]:
         GROUP BY s.session_id
         ORDER BY first_event DESC
         """
+    ).fetchall()
+    columns = [desc[0] for desc in conn.description]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def write_message(
+    conn: duckdb.DuckDBPyConnection,
+    message_id: str,
+    session_id: str,
+    agent_id: str,
+    role: str,
+    content: str,
+    sequence: int,
+    timestamp: str | None = None,
+) -> None:
+    content_bytes = len(content.encode("utf-8")) if content else 0
+    conn.execute(
+        """
+        INSERT INTO messages (message_id, session_id, agent_id, role, content, sequence, timestamp, content_bytes)
+        VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, now()), ?)
+        """,
+        [message_id, session_id, agent_id, role, content, sequence, timestamp, content_bytes],
+    )
+
+
+def get_agent_messages(conn: duckdb.DuckDBPyConnection, agent_id: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM messages WHERE agent_id = ? ORDER BY sequence ASC",
+        [agent_id],
+    ).fetchall()
+    columns = [desc[0] for desc in conn.description]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def search_messages(
+    conn: duckdb.DuckDBPyConnection,
+    query: str,
+    session_id: str | None = None,
+) -> list[dict]:
+    clauses = ["content IS NOT NULL", "contains(lower(content), lower(?))"]
+    params: list = [query]
+
+    if session_id:
+        clauses.append("session_id = ?")
+        params.append(session_id)
+
+    where = " AND ".join(clauses)
+    rows = conn.execute(
+        f"""
+        SELECT message_id, session_id, agent_id, role, sequence, timestamp, content_bytes,
+               substring(content, 1, 500) AS content_preview
+        FROM messages
+        WHERE {where}
+        ORDER BY timestamp ASC
+        """,
+        params,
     ).fetchall()
     columns = [desc[0] for desc in conn.description]
     return [dict(zip(columns, row)) for row in rows]
