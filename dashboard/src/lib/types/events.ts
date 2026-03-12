@@ -91,6 +91,18 @@ export interface QueryResult {
 	graph?: SessionGraph;
 }
 
+export type MessageRole = 'user' | 'assistant' | 'system';
+
+export interface AgentMessage {
+	message_id: string;
+	session_id: string;
+	agent_id: string;
+	role: MessageRole;
+	content: string;
+	sequence: number;
+	timestamp: string;
+}
+
 export interface ToolStats {
 	tool_name: string;
 	call_count: number;
