@@ -7,49 +7,70 @@ description: Six dashboard views, design system, interaction patterns, and respo
 
 ## Overview
 
-Local-only, read-only, real-time monitoring at `http://localhost:4242`. Six views, each answering a different question about agent execution. Runs as a companion to your terminal.
+Local-only, read-only, real-time monitoring at `http://localhost:4242`. Seven views, each answering a different question about agent execution. Runs as a companion to your terminal.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> SpawnTree : Default view
+    [*] --> Galaxy : Default (2+ sessions)
+    [*] --> SpawnTree : Default (0-1 sessions)
 
+    Galaxy --> SpawnTree : Click session / Cmd+1
+    Galaxy --> Timeline : Cmd+2
+    Galaxy --> ToolFeed : Cmd+3
+    Galaxy --> Analytics : Cmd+4
+    Galaxy --> Query : Cmd+5
+    Galaxy --> Sessions : Cmd+6
+
+    SpawnTree --> Galaxy : Cmd+0
     SpawnTree --> Timeline : Cmd+2
     SpawnTree --> ToolFeed : Cmd+3
     SpawnTree --> Analytics : Cmd+4
     SpawnTree --> Query : Cmd+5
     SpawnTree --> Sessions : Cmd+6
 
+    Timeline --> Galaxy : Cmd+0
     Timeline --> SpawnTree : Cmd+1
     Timeline --> ToolFeed : Cmd+3
     Timeline --> Analytics : Cmd+4
     Timeline --> Query : Cmd+5
     Timeline --> Sessions : Cmd+6
 
+    ToolFeed --> Galaxy : Cmd+0
     ToolFeed --> SpawnTree : Cmd+1
     ToolFeed --> Timeline : Cmd+2
     ToolFeed --> Analytics : Cmd+4
     ToolFeed --> Query : Cmd+5
     ToolFeed --> Sessions : Cmd+6
 
+    Analytics --> Galaxy : Cmd+0
     Analytics --> SpawnTree : Cmd+1
     Analytics --> Timeline : Cmd+2
     Analytics --> ToolFeed : Cmd+3
     Analytics --> Query : Cmd+5
     Analytics --> Sessions : Cmd+6
 
+    Query --> Galaxy : Cmd+0
     Query --> SpawnTree : Cmd+1
     Query --> Timeline : Cmd+2
     Query --> ToolFeed : Cmd+3
     Query --> Analytics : Cmd+4
     Query --> Sessions : Cmd+6
 
+    Sessions --> Galaxy : Cmd+0
     Sessions --> SpawnTree : Cmd+1
     Sessions --> Timeline : Cmd+2
     Sessions --> ToolFeed : Cmd+3
     Sessions --> Analytics : Cmd+4
     Sessions --> Query : Cmd+5
 
-    Sessions --> SpawnTree : Select past session
+    Galaxy --> SpawnTree : Click session bar
+
+    state Galaxy {
+        [*] --> SwimLanes
+        SwimLanes --> SessionDetail : Click bar
+        SessionDetail --> SwimLanes : Escape
+        SessionDetail --> SpawnTree : Open Tree
+    }
 
     state SpawnTree {
         [*] --> LiveGraph
@@ -73,6 +94,8 @@ flowchart TB
     subgraph SOURCES ["Data Sources"]
         SSE["SSE /stream"]
         REST_S["GET /api/sessions"]
+        REST_SG["GET /api/sessions/grouped"]
+        REST_SA["GET /api/sessions/activity"]
         REST_G["GET .../graph"]
         REST_T["GET .../timeline"]
         REST_E["GET /api/events"]
@@ -83,10 +106,12 @@ flowchart TB
     subgraph STORES ["Client Stores"]
         EVT["Event Store<br/>10k ring buffer"]
         SESS["Session Store"]
+        WS["Workspace Store"]
         CONN["Connection Store"]
     end
 
     subgraph VIEWS ["Views"]
+        V0["Galaxy View"]
         V1["Spawn Tree"]
         V2["Timeline"]
         V3["Tool Feed"]
@@ -97,9 +122,14 @@ flowchart TB
 
     SSE --> EVT
     SSE --> CONN
+    SSE --> WS
     REST_S --> SESS
     REST_S --> V6
+    REST_SG --> WS
+    REST_SA --> V0
 
+    WS --> V0
+    EVT --> V0
     EVT --> V1
     EVT --> V2
     EVT --> V3
@@ -114,6 +144,75 @@ flowchart TB
     SESS --> V2
     SESS --> V6
 ```
+
+## View 0: Galaxy View
+
+**What's running across all my repos right now?**
+
+Top-level entry point when 2+ sessions exist. Temporal swim lanes — horizontal bars per session on a shared time axis, grouped into workspace lanes by `cwd`. A uPlot time brush at the top controls the visible window.
+
+Full design spec: [`docs/plans/multi-session-overview.md`](../plans/multi-session-overview.md).
+
+**Layout:**
+
+```
++------------------------------------------------------------------------+
+| Time Brush — uPlot sparkline (event density, stacked by workspace)     |
+| [===========selected range============]                        64px    |
++------------------------------------------------------------------------+
+| Workspace Lanes                                                        |
+|                                                                        |
+| observable-claude  2 active · 4 total                          32px hdr|
+| ─────────────────────────────────────────────────────────              |
+|  ██████████████████████████████████████▓▓▓▓▓▓▓▓▓→  sess_a1            |
+|    ████████████████████████████████████████▓▓▓→     sess_a2            |
+|      ████████████████████████                       sess_a3            |
+|                     █████████████████               sess_a4            |
+|                                                                        |
+| wolfpack  1 active · 1 total                                           |
+| ─────────────────────────────────────────────────────────              |
+|  ██████████████████████████████████████████████▓▓→  sess_b1            |
++------------------------------------------------------------------------+
+```
+
+**Time brush (top, 64px):** Stacked area sparkline showing event density over the full available time range. One color per workspace. Drag to select a window, drag edges to resize, drag body to pan. Double-click resets to default (last 4 hours or full session range, whichever is shorter).
+
+**Workspace lanes:** Horizontal swim lanes, one per workspace. Sorted by most-recent-activity (active workspaces first). Each lane has a 32px header showing workspace name (last path segment), full path on hover, and active/total session counts. Lanes are independently collapsible — collapsed view shows a mini contribution-strip preview inline.
+
+**Session bars:** Horizontal bars proportional to session duration on the shared time axis.
+
+| Property | Encoding |
+|---|---|
+| Duration | Bar length |
+| Active status | Teal bar with gradient-fade right edge + animated 2px teal border (bar is "still growing") |
+| Completed status | Muted dark gray bar with hard right edge |
+| Failed status | 4px coral left border |
+| Agent depth | Bar height: 24px base + 2px per agent, max 40px |
+| Event density | Subtle heat gradient within the bar (darker = more events) |
+
+Bar inline content (clipped to bar width): session ID (monospace 11px), branch name (muted), agent count badge. Bars narrower than 80px show tooltip only.
+
+**Detail panel (320px, slide-in right):** Click any session bar. Shows session ID, status badge, workspace path, branch, start time (absolute + relative), duration (live if active), agent/event counts, and a mini Cytoscape.js spawn tree preview (200px, non-interactive). Action buttons: `[Open Spawn Tree]`, `[Open Timeline]`.
+
+**Interactions:**
+- Click bar: open detail panel. Click empty space: close.
+- `↑`/`↓`: move selection between bars. `←`/`→`: pan time brush. `Enter`: open Spawn Tree. `Escape`: close detail. `Cmd+0`: navigate to Galaxy View.
+- New sessions appear with 300ms slide-in animation. If the session's workspace lane is collapsed, it auto-expands.
+
+**Responsive:**
+- < 900px: detail panel becomes bottom sheet (50% viewport). Sparkline reduced to 48px. No inline bar text.
+- 900-1200px: 280px side panel. Truncated IDs on bars.
+- \> 1200px: 320px side panel. Full bar labels.
+
+**States:**
+- Empty: "No sessions observed. Start a Claude Code session to begin."
+- Loading: brush skeleton + 3 lane skeletons with gray bar placeholders.
+- Error: banner "Failed to load sessions. [Retry]" with coral background.
+- Overflow (50+ sessions): virtualized lanes, auto-collapse at 8+ workspaces.
+
+**Route:** `/galaxy` — default when 2+ sessions exist. Single session skips to Spawn Tree.
+
+---
 
 ## View 1: Spawn Tree
 
@@ -265,6 +364,20 @@ Each item:
 | `--color-text-muted` | `#64748B` | Gray — secondary labels |
 | `--color-border` | `#1E3A4A` | Subtle borders |
 
+#### Tool Family Colors
+
+Tool calls are classified into five families, each with a dedicated color token. These colors are distinct from the status palette (teal/gray/coral/amber) to avoid confusion between "what kind of tool" and "what happened."
+
+| Token | Hex | Family | Tools |
+|---|---|---|---|
+| `--tool-file` | `#7EB8DA` | File ops | Read, Write, Edit, Glob, Grep |
+| `--tool-exec` | `#B8A9E8` | Execution | Bash |
+| `--tool-agent` | `#0A9396` | Orchestration | Agent (reuses primary) |
+| `--tool-mcp` | `#E8A87C` | External services | mcp__* |
+| `--tool-meta` | `#94D2BD` | Internal bookkeeping | TodoRead, TodoWrite, TaskCreate, etc. (reuses success) |
+
+Classification rule: `mcp__` prefix = MCP family. Named matches for File, Exec, Agent. Everything else = Meta. No ambiguity.
+
 ### Typography
 
 | Element | Font / Size / Weight | Usage |
@@ -292,6 +405,16 @@ Each item:
 
 **Event Row:** 48px collapsed, auto-height expanded (min 200px). 4px colored left border. 150ms ease-out expand animation. Expanded JSON: dark background, teal keys, amber strings, mint numbers.
 
+**Tool Pip:** 8px circle, solid fill in tool family color. Status encoding: success = solid fill, failed = family color + 1px coral ring, pending = 40% opacity + pulse animation. Optional duration scaling: 6px (<100ms) to 14px (>2s). Duration outliers (>p95) get an amber outer glow.
+
+**Tool Strip:** Horizontal sequence of Tool Pips showing an agent's tool call history, left-to-right chronological. 2px gap between pips. Fills available width; overflows with fade-out gradient and "+N" count. Used in Spawn Tree detail panel and anywhere an agent's tool pattern needs to be shown inline.
+
+**Tool Family Bar:** Stacked horizontal bar (12px tall) showing the proportion of each tool family in an agent's or session's tool calls. Each segment colored by family token. Hover a segment to see the count and percentage.
+
+**Tool Summary:** One-line stats: total tool calls, success rate (percentage), median duration (ms). Used in detail panels below the Tool Family Bar.
+
+Full spec: [`docs/plans/tool-call-visualization.md`](plans/tool-call-visualization.md).
+
 ### Layout
 
 **Top bar (48px):**
@@ -301,7 +424,7 @@ Each item:
 
 **Left sidebar:**
 - 200px expanded, 56px collapsed (icon only)
-- 6 items: Spawn Tree, Timeline, Tool Feed, Analytics, Query, Sessions
+- 7 items: Galaxy, Spawn Tree, Timeline, Tool Feed, Analytics, Query, Sessions
 - Active: teal left border + background tint
 - Auto-collapses below 960px
 - Badges: agent count on Spawn Tree, unread count on Tool Feed
@@ -310,11 +433,15 @@ Each item:
 
 | Shortcut | Action |
 |---|---|
-| `Cmd+1` - `Cmd+6` | Switch views |
+| `Cmd+0` | Galaxy View |
+| `Cmd+1` - `Cmd+6` | Switch views (Spawn Tree through Sessions) |
 | `Cmd+Enter` | Submit query |
 | `Escape` | Close panels, collapse rows |
 | `Space` | Toggle pause (Tool Feed) |
 | `/` | Focus query input |
+| `↑`/`↓` | Navigate session bars (Galaxy View) |
+| `←`/`→` | Pan time brush (Galaxy View) |
+| `Enter` | Open selected session's Spawn Tree (Galaxy View) |
 
 ### Responsive Behavior
 
