@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { agentCount, unreadToolCount } from '$lib/stores/events';
+	import { activeSessionCount } from '$lib/stores/workspace';
 
 	let collapsed = $state(false);
 	let autoCollapsed = $state(false);
 
 	const navItems = [
+		{ path: '/galaxy', label: 'Galaxy', icon: '\u2726', badgeStore: 'sessions' },
 		{ path: '/tree', label: 'Spawn Tree', icon: '\u25C9', badgeStore: 'agents' },
 		{ path: '/timeline', label: 'Timeline', icon: '\u2503', badgeStore: null },
 		{ path: '/tools', label: 'Tool Feed', icon: '\u25B6', badgeStore: 'tools' },
@@ -35,12 +37,15 @@
 
 	function isActive(itemPath: string, currentPath: string): boolean {
 		if (itemPath === '/tree' && currentPath === '/') return true;
-		return currentPath.startsWith(itemPath);
+		if (itemPath === '/galaxy' && currentPath === '/galaxy') return true;
+		return currentPath.startsWith(itemPath) && itemPath !== '/galaxy';
 	}
 
 	function getBadge(item: typeof navItems[0]): number {
 		if (item.badgeStore === 'agents') return $agentCount.active;
 		if (item.badgeStore === 'tools') return $unreadToolCount;
+		// Only show session count badge when 2+ active sessions
+		if (item.badgeStore === 'sessions') return $activeSessionCount >= 2 ? $activeSessionCount : 0;
 		return 0;
 	}
 </script>

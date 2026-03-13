@@ -1,5 +1,8 @@
 <script lang="ts">
 	import type { GraphNode } from '$lib/types/events';
+	import ToolFamilyBar from '$lib/components/ToolFamilyBar.svelte';
+	import ToolSummary from '$lib/components/ToolSummary.svelte';
+	import { navigateToToolFeed } from '$lib/services/navigation';
 
 	let { node, onclose }: { node: GraphNode | null; onclose: () => void } = $props();
 
@@ -16,6 +19,18 @@
 		complete: { bg: 'var(--color-surface-2)', text: 'var(--color-text-muted)' },
 		failed: { bg: 'var(--color-error)', text: 'white' }
 	};
+
+	// Build expanded tool names list for family bar
+	let toolNamesList = $derived.by(() => {
+		if (!node?.data.tools) return [];
+		const names: string[] = [];
+		for (const [name, count] of Object.entries(node.data.tools)) {
+			for (let i = 0; i < (count as number); i++) {
+				names.push(name);
+			}
+		}
+		return names;
+	});
 
 	$effect(() => {
 		function handleClose() { onclose(); }
@@ -90,6 +105,22 @@
 				{#if node.data.tools && Object.keys(node.data.tools).length > 0}
 					<div>
 						<span style="color: var(--color-text-muted);">Tools ({node.data.tool_count})</span>
+
+						<!-- Tool family proportion bar -->
+						<div class="mt-2 mb-2">
+							<ToolFamilyBar toolNames={toolNamesList} height={12} />
+						</div>
+
+						<!-- Tool summary stats -->
+						<div class="mb-2">
+							<ToolSummary
+								totalCalls={node.data.tool_count}
+								successCount={node.data.tool_count}
+								failCount={0}
+							/>
+						</div>
+
+						<!-- Individual tool counts -->
 						<div class="mt-1 space-y-1">
 							{#each Object.entries(node.data.tools) as [name, count]}
 								<div class="flex justify-between">
@@ -98,6 +129,15 @@
 								</div>
 							{/each}
 						</div>
+
+						<!-- View in Tool Feed link -->
+						<button
+							class="mt-2 text-xs cursor-pointer border-none px-0"
+							style="background: transparent; color: var(--color-primary);"
+							onclick={() => navigateToToolFeed(node?.data.id)}
+						>
+							View in Tool Feed &rarr;
+						</button>
 					</div>
 				{/if}
 
