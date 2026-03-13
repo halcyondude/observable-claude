@@ -97,3 +97,4 @@ RETURN a.agent_id, t.name, r.tool_input, r.start_ts;
 - `/oc:stop` — stop the Docker stack
 - `/oc:status` — check observer health and activity
 - `/oc:query [question]` — query the execution graph
+- `/oc:visual-check [fix]` — autonomous visual QA of the dashboard (optionally auto-fix issues)
