@@ -62,6 +62,16 @@ export const toolNames = derived(events, ($events) => {
 
 export const unreadToolCount = writable(0);
 
+/** Track message counts per session from SSE message events */
+export const sessionMessageCounts = writable<Record<string, number>>({});
+
+export function incrementSessionMessageCount(sessionId: string): void {
+	sessionMessageCounts.update((counts) => ({
+		...counts,
+		[sessionId]: (counts[sessionId] ?? 0) + 1
+	}));
+}
+
 /** Filter events by session_id. Returns a derived store scoped to one session. */
 export function getSessionEvents(sessionId: string) {
 	return derived(events, ($events) => $events.filter((e) => e.session_id === sessionId));

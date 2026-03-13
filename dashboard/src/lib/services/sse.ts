@@ -1,5 +1,5 @@
 import { connectionStatus, reconnectAttempt } from '$lib/stores/connection';
-import { events, unreadToolCount } from '$lib/stores/events';
+import { events, unreadToolCount, incrementSessionMessageCount } from '$lib/stores/events';
 import {
 	activeSessionId,
 	addSession,
@@ -79,6 +79,19 @@ export function connectSSE(): void {
 			// ignore malformed messages
 		}
 	};
+
+	// Handle named 'message' events from collector (touchpoint 5: conversation SSE routing)
+	eventSource.addEventListener('message', (msg) => {
+		try {
+			const data = JSON.parse(msg.data);
+			const sessionId = data.session_id;
+			if (sessionId) {
+				incrementSessionMessageCount(sessionId);
+			}
+		} catch {
+			// ignore malformed message events
+		}
+	});
 
 	eventSource.onerror = () => {
 		eventSource?.close();

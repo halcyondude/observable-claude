@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { SessionInfo } from '$lib/types/events';
 	import { goto } from '$app/navigation';
+	import { sessionMessageCounts } from '$lib/stores/events';
 
 	let {
 		session,
@@ -173,6 +174,10 @@
 					<span style="color: var(--color-text-muted);">Events</span>
 					<div class="mt-0.5 text-lg font-semibold">{session!.event_count}</div>
 				</div>
+				<div>
+					<span style="color: var(--color-text-muted);">Messages</span>
+					<div class="mt-0.5 text-lg font-semibold">{$sessionMessageCounts[session!.session_id] ?? 0}</div>
+				</div>
 			</div>
 
 			<!-- Mini spawn tree placeholder -->
@@ -205,7 +210,7 @@
 			</div>
 
 			<!-- Action buttons -->
-			<div class="flex gap-2 pt-2">
+			<div class="flex flex-wrap gap-2 pt-2">
 				<button
 					class="flex-1 py-2 px-3 rounded text-xs font-medium cursor-pointer border-none"
 					style="background: var(--color-primary); color: white;"
@@ -220,6 +225,15 @@
 				>
 					Open Timeline
 				</button>
+				{#if ($sessionMessageCounts[session!.session_id] ?? 0) > 0}
+					<button
+						class="flex-1 py-2 px-3 rounded text-xs font-medium cursor-pointer border-none"
+						style="background: var(--color-surface-2); color: var(--color-text);"
+						onclick={() => goto(`/sessions?session=${session!.session_id}&tab=conversation`)}
+					>
+						Open Conversation
+					</button>
+				{/if}
 			</div>
 		</div>
 	</div>
