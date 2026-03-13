@@ -19,13 +19,13 @@ Real-time execution graph monitoring for Claude Code. Captures lifecycle events 
 - LadybugDB MCP server gives Claude direct Cypher execution
 - `scripts/replay.py` rebuilds LadybugDB from DuckDB if needed
 
-## Build Phases
+## v1 Features (implemented, branch feat/19-integration)
 
-1. Docker stack + hook plumbing (FastAPI collector, DuckDB, LadybugDB, dual hook delivery)
-2. Graph materialization (per-event Cypher mutations, DDL, replay script)
-3. Plugin shell (plugin.json, commands, skill, agent, .mcp.json)
-4. NL→Cypher (Anthropic API, /api/ask endpoint, /oc:query command)
-5. Dashboard (SvelteKit + nginx, SSE + REST wiring)
+- **Agent Conversations** — prompt capture, message graph, conversation panel, full-text search, response inference
+- **Session Save/Replay** — bookmark/star sessions, .ccobs export/import, event replay with playback controls
+- **Galaxy View** — multi-session overview with temporal swim lanes, uPlot time brush, workspace grouping by cwd, git branch detection
+- **Tool Call Visualization** — 5 tool families (File/Exec/Agent/MCP/Meta), pip rings on spawn tree, expandable timeline rows, cross-view navigation
+- **UI Testing** (in progress) — Playwright MCP, E2E tests, Histoire component stories, visual regression
 
 ## DreamTeams Plugins
 
