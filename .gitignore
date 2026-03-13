@@ -8,3 +8,6 @@ __pycache__
 .svelte-kit/
 build/
 .claude/worktrees/
+
+*storybook.log
+storybook-static
