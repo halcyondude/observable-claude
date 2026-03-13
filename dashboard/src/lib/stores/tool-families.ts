@@ -29,6 +29,8 @@ export function getToolFamilyColor(toolName: string): string {
 	return TOOL_FAMILIES[getToolFamily(toolName)].color;
 }
 
+export const getToolColor = getToolFamilyColor;
+
 export interface FamilyCount {
 	family: ToolFamily;
 	count: number;
