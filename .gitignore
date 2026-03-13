@@ -11,3 +11,9 @@ build/
 
 *storybook.log
 storybook-static
+
+# Visual regression baselines — generated per-platform, not portable across OS.
+# Each developer/CI runner generates its own via: dashboard/scripts/update-baselines.sh
+dashboard/tests/e2e/screenshots/
+dashboard/test-results/
+dashboard/playwright-report/
