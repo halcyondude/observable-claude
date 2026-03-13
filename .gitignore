@@ -7,4 +7,6 @@ __pycache__
 .venv/
 .svelte-kit/
 build/
+test-results/
+dashboard/tests/e2e/screenshots/
 .claude/worktrees/
