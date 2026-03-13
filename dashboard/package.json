@@ -22,7 +22,8 @@
   },
   "dependencies": {
     "cytoscape": "^3.30.0",
-    "cytoscape-dagre": "^2.5.0"
+    "cytoscape-dagre": "^2.5.0",
+    "uplot": "^1.6.31"
   },
   "type": "module"
 }

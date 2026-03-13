@@ -9,6 +9,7 @@ export type EventType =
 	| 'SkillLoaded';
 
 export type AgentStatus = 'running' | 'complete' | 'failed';
+export type SessionStatus = 'active' | 'complete' | 'failed';
 export type ConnectionStatus = 'connected' | 'reconnecting' | 'disconnected';
 
 export interface ObserverEvent {
@@ -91,6 +92,25 @@ export interface QueryResult {
 	graph?: SessionGraph;
 }
 
+export interface SessionState {
+	session_id: string;
+	cwd: string;
+	branch?: string;
+	status: SessionStatus;
+	agent_count: number;
+	event_count: number;
+	start_ts: string;
+	end_ts?: string;
+}
+
+export interface WorkspaceState {
+	path: string;
+	name: string;
+	sessions: string[];
+	activeCount: number;
+	totalCount: number;
+}
+
 export interface ToolStats {
 	tool_name: string;
 	call_count: number;
@@ -98,4 +118,42 @@ export interface ToolStats {
 	fail_count: number;
 	p50_ms: number;
 	p95_ms: number;
+}
+
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
+
+export interface AgentMessage {
+	message_id: string;
+	event_id?: string;
+	session_id: string;
+	agent_id: string;
+	role: MessageRole;
+	sequence: number;
+	timestamp: string;
+	content?: string;
+	content_preview?: string;
+	content_bytes?: number;
+	synthetic?: boolean;
+	metadata?: Record<string, unknown>;
+}
+
+export interface MessageSearchResult {
+	message_id: string;
+	session_id: string;
+	agent_id: string;
+	role: string;
+	sequence: number;
+	timestamp: string;
+	content_preview: string;
+	content_bytes: number;
+	snippet: string | null;
+}
+
+export interface MessageSearchParams {
+	q: string;
+	session_id?: string;
+	agent_id?: string;
+	role?: string;
+	limit?: number;
+	offset?: number;
 }

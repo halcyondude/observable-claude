@@ -4,6 +4,7 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { viewingArchived, returnToLive, activeSession } from '$lib/stores/session';
 	import { connectSSE, disconnectSSE } from '$lib/services/sse';
+	import { getAgentFromUrl, navigateToToolFeed } from '$lib/services/navigation';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
@@ -15,6 +16,10 @@
 		const viewRoutes = ['/tree', '/timeline', '/tools', '/analytics', '/query', '/sessions'];
 
 		function handleKeydown(e: KeyboardEvent) {
+			if (e.metaKey && e.key === '0') {
+				e.preventDefault();
+				goto('/galaxy');
+			}
 			if (e.metaKey && e.key >= '1' && e.key <= '6') {
 				e.preventDefault();
 				const idx = parseInt(e.key) - 1;
@@ -22,6 +27,14 @@
 			}
 			if (e.key === 'Escape') {
 				document.dispatchEvent(new CustomEvent('close-panels'));
+			}
+			if (e.key === 'f' || e.key === 'F') {
+				const tag = (e.target as HTMLElement)?.tagName;
+				if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+					e.preventDefault();
+					const agentId = getAgentFromUrl();
+					navigateToToolFeed(agentId ?? undefined);
+				}
 			}
 		}
 

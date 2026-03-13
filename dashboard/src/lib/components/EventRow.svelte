@@ -1,8 +1,11 @@
 <script lang="ts">
 	import type { ObserverEvent } from '$lib/types/events';
+	import ToolPip from '$lib/components/ToolPip.svelte';
+	import { navigateToAgent, navigateToTimeline } from '$lib/services/navigation';
 
 	let { event }: { event: ObserverEvent } = $props();
 	let expanded = $state(false);
+	let hovered = $state(false);
 
 	function borderColor(type: string): string {
 		switch (type) {
@@ -28,6 +31,14 @@
 			case 'PostToolUse': return 'POST';
 			case 'PostToolUseFailure': return 'FAIL';
 			default: return type;
+		}
+	}
+
+	function pipStatus(type: string): 'success' | 'failed' | 'pending' {
+		switch (type) {
+			case 'PreToolUse': return 'pending';
+			case 'PostToolUseFailure': return 'failed';
+			default: return 'success';
 		}
 	}
 
@@ -72,6 +83,18 @@
 		}
 	}
 
+	function handleAgentClick(e: MouseEvent) {
+		e.stopPropagation();
+		if (event.agent_id) {
+			navigateToAgent(event.agent_id);
+		}
+	}
+
+	function handleTimelineClick(e: MouseEvent) {
+		e.stopPropagation();
+		navigateToTimeline(event.agent_id, event.tool_use_id);
+	}
+
 	$effect(() => {
 		function handleClose() { expanded = false; }
 		document.addEventListener('close-panels', handleClose);
@@ -84,6 +107,8 @@
 	style="border-left: 4px solid {borderColor(event.event_type)}; background: var(--color-surface);"
 	onclick={() => expanded = !expanded}
 	onkeydown={(e) => { if (e.key === 'Enter') expanded = !expanded; }}
+	onmouseenter={() => hovered = true}
+	onmouseleave={() => hovered = false}
 	role="button"
 	tabindex="0"
 >
@@ -91,6 +116,10 @@
 		<span class="font-mono text-xs shrink-0" style="color: var(--color-text-muted); width: 80px;">
 			{formatTimestamp(event.received_at)}
 		</span>
+
+		{#if event.tool_name}
+			<ToolPip toolName={event.tool_name} size={8} status={pipStatus(event.event_type)} title={event.tool_name} />
+		{/if}
 
 		{#if true}
 			{@const pill = pillColor(event.event_type)}
@@ -106,13 +135,31 @@
 			{event.tool_name ?? ''}
 		</span>
 
-		<span class="text-xs shrink-0" style="color: var(--color-text-muted);">
-			{event.agent_type ?? ''}
-		</span>
+		{#if event.agent_type}
+			<button
+				class="text-xs shrink-0 cursor-pointer border-none px-1 py-0.5 rounded"
+				style="background: transparent; color: var(--color-text-muted);"
+				onclick={handleAgentClick}
+				title="View agent in Spawn Tree"
+			>
+				{event.agent_type}
+			</button>
+		{/if}
 
 		<span class="flex-1 text-xs truncate" style="color: var(--color-text-muted);">
 			{getSummary(event)}
 		</span>
+
+		{#if hovered && event.agent_id}
+			<button
+				class="text-xs shrink-0 cursor-pointer border-none px-1.5 py-0.5 rounded"
+				style="background: var(--color-surface-2); color: var(--color-text-muted);"
+				onclick={handleTimelineClick}
+				title="Show in Timeline"
+			>
+				&#x23F1;
+			</button>
+		{/if}
 
 		{#if event.event_type === 'PostToolUse' || event.event_type === 'PostToolUseFailure'}
 			{@const dur = getDuration(event)}
